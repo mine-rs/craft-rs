@@ -5,4 +5,4 @@ pub trait PacketBuilderExt: Packet {
     fn new(data: Self::Data) -> Self;
 }
 
-// TODO: Create the PacketData types and implement PacketBuilderExt for 
+// TODO: Create the PacketData types and implement PacketBuilderExt for
