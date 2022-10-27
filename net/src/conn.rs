@@ -8,6 +8,8 @@ use tokio::net::{
 };
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
+use crate::packet::DynPacket;
+
 pub struct Connection {
     inner: miners::net::conn::Connection<
         BufReader<Compat<OwnedReadHalf>>,
@@ -97,5 +99,9 @@ impl WriteHalf {
         self.inner
             .write_packet(version, packet, &mut self.encoder)
             .await
+    }
+
+    pub async fn write_dyn_packet(&mut self, version: i32, packet: &dyn DynPacket<Vec<u8>>) -> miners::encoding::encode::Result<()> {
+        self.inner.write_dyn_packet(version, packet, &mut self.encoder).await
     }
 }

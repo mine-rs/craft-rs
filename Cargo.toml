@@ -5,7 +5,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-miners = { version = "0.0.0-beta.0", git = "https://github.com/mine-rs/mine-rs", ref = "f5e32e9faffd82332fa6996ae48aa6d4ff988273" }
+miners = { version = "0.0.0-beta.0", git = "https://github.com/mine-rs/mine-rs", ref = "498fe4e8166f2d30f35f0e37db0a5144d6257625" }
 
 [workspace]
 members = [
