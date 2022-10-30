@@ -8,7 +8,6 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1.21.2", features = ["net"]}
 miners = { version = "0.0.0-beta.0", git = "https://github.com/mine-rs/mine-rs", ref = "498fe4e8166f2d30f35f0e37db0a5144d6257625"}
-tokio-util = { version = "0.7.4", features = ["compat"] }
 futures-lite = { version = "1.12.0" }
 crypto-common = {version = "0.1.6"}
 anyhow = "*"
