@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 //TODO: Add a BiomePalette struct
 
-//TODO: Refactor ! 
+//TODO: Refactor !
 
 //TODO: Tests !
 
@@ -91,26 +91,22 @@ impl<S: State> StatePalette<S> {
                             palette,
                         };
                         //SAFETY: This is sound because we know it is in bounds as we specified the len.
-                            for i in 0..self.data.len() {
-                                new.data.set_unchecked(i, self.data.get_unchecked(i))
-                            }
-                            // SAFETY: We know this is sound because we checked the bounds
-                            new.data.set_unchecked(i, state.into());
-                        
+                        for i in 0..self.data.len() {
+                            new.data.set_unchecked(i, self.data.get_unchecked(i))
+                        }
+
                         *self = new
                     }
 
                     5 => {
                         // SAFETY: This is fine because the bits will only be 5 when the palette was a `LinearPalette`
-                        let palette = 
-                            match &mut self.palette {
-                                PaletteImpl::SingleValuePalette(_) => {
-                                    std::hint::unreachable_unchecked()
-                                }
-                                PaletteImpl::LinearPalette(p) => p,
-                                PaletteImpl::MappedPalette(_) => std::hint::unreachable_unchecked(),
-                                PaletteImpl::Global => std::hint::unreachable_unchecked(),
-                            
+                        let palette = match &mut self.palette {
+                            PaletteImpl::SingleValuePalette(_) => {
+                                std::hint::unreachable_unchecked()
+                            }
+                            PaletteImpl::LinearPalette(p) => p,
+                            PaletteImpl::MappedPalette(_) => std::hint::unreachable_unchecked(),
+                            PaletteImpl::Global => std::hint::unreachable_unchecked(),
                         };
                         let mut indices = BTreeMap::new();
                         for i in 0..palette.values.len() {
@@ -131,23 +127,20 @@ impl<S: State> StatePalette<S> {
                         };
                         //SAFETY: This is sound because we know it is in bounds as we specified the len.
 
-                            for i in 0..self.data.len() {
-                                new.data.set_unchecked(i, self.data.get_unchecked(i))
-                            }
-                            // SAFETY: We know this is sound because we checked the bounds
-                            new.data.set_unchecked(i, state.into());
+                        for i in 0..self.data.len() {
+                            new.data.set_unchecked(i, self.data.get_unchecked(i))
+                        }
                         *self = new
                     }
                     6..=8 => {
                         // SAFETY: This is fine because the bits will only be 6..8 when the palette was a `MappedPalette`
-                        let mut palette = 
-                            match &mut self.palette {
-                                PaletteImpl::SingleValuePalette(_) => {
-                                    std::hint::unreachable_unchecked()
-                                }
-                                PaletteImpl::LinearPalette(_) => std::hint::unreachable_unchecked(),
-                                PaletteImpl::MappedPalette(p) => p,
-                                PaletteImpl::Global => std::hint::unreachable_unchecked(),
+                        let mut palette = match &mut self.palette {
+                            PaletteImpl::SingleValuePalette(_) => {
+                                std::hint::unreachable_unchecked()
+                            }
+                            PaletteImpl::LinearPalette(_) => std::hint::unreachable_unchecked(),
+                            PaletteImpl::MappedPalette(p) => p,
+                            PaletteImpl::Global => std::hint::unreachable_unchecked(),
                         };
                         palette.inner.bits = bits;
                     }
@@ -168,6 +161,7 @@ impl<S: State> StatePalette<S> {
                     // This is sound because we know bits can only be 5, 6..=8, or 9.
                     _ => std::hint::unreachable_unchecked(),
                 }
+                self.set_unchecked(i, state)
             }
         }
     }
