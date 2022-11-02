@@ -91,7 +91,7 @@ impl PackedBits {
 
     #[inline]
     pub fn get(&self, i: usize) -> Option<u64> {
-        if i < self.len - 1 {
+        if i > self.len - 1 {
             return None;
         }
         // SAFETY: This is fine because we already checked that the index is within bounds.
