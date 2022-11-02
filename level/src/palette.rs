@@ -1,6 +1,6 @@
 use crate::bitpack::PackedBits;
 use craftrs_block::State;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, mem::MaybeUninit};
 
 //TODO: Add encoding
 
@@ -10,15 +10,92 @@ use std::collections::BTreeMap;
 
 //TODO: Tests !
 
-pub struct StatePalette<S> {
-    palette: PaletteImpl<S>,
+
+//TODO: Use a union instead of an enum
+pub struct BiomePaletteContainer<S> {
+    palette: BiomePaletteImpl<S>,
+    data: MaybeUninit<PackedBits>,
+    // This is used to only later initialise the `PackedBits`
+    len: usize, 
+}
+
+impl<S: State> BiomePaletteContainer<S> {
+    pub fn new(len: usize, value: S) -> Self {
+        Self { palette: BiomePaletteImpl::SingleValuePalette(SingleValuePalette {value }), data: MaybeUninit::uninit(), len }
+    }
+
+    pub fn get(&self, i: usize) -> Option<S> {
+        match &self.palette {
+            BiomePaletteImpl::SingleValuePalette(p) => {
+                if i == 0 {
+                    return Some(p.value)
+                }
+                panic!("out of bounds")
+            }
+            BiomePaletteImpl::LinearPalette(p) => {
+                //SAFETY: We know this is safe as data is constructed when a LinearPalette is created.
+                let data = unsafe { self.data.assume_init_ref() };
+                Some(p.state(data.get(i)? as usize))
+            }
+        }
+    }
+
+    pub fn set(&mut self, i: usize, state: S) {
+        if i > self.len-1 {
+            panic!("out of bounds")
+        }
+        //SAFETY: This is fine becuase we checked that the index is in bounds 
+        unsafe {
+            self.set_unchecked(i, state)
+        }
+    }
+
+    pub unsafe fn set_unchecked(&mut self, i: usize, state: S) {
+        loop {
+            match &mut self.palette {
+                BiomePaletteImpl::SingleValuePalette(p) => {
+                    if p.value == state {
+                        return
+                    };
+                    self.palette = BiomePaletteImpl::LinearPalette(LinearPalette {
+                        bits: 1,
+                        values: Vec::with_capacity(2),
+                    });
+                    self.data = MaybeUninit::new(PackedBits::new(self.len, 1))
+                },
+                BiomePaletteImpl::LinearPalette(p) => {
+                    loop {
+                        match p.index(state) {
+                            IndexOrBits::Index(index) => {
+                                let data = self.data.assume_init_mut();
+                                data.set_unchecked(i, index as u64)
+                            }, 
+                            IndexOrBits::Bits(bits) => {
+                                let mut packedbits = PackedBits::new(self.len, bits);
+                                for i in 0..self.data.assume_init_ref().len() {
+                                    packedbits.set_unchecked(i, packedbits.get_unchecked(i));
+                                }
+                                p.values.reserve_exact(2usize.pow(bits as u32) / 2)
+                            },
+                        }
+                    }
+                },
+            }
+        }
+
+    }
+}
+
+// TODO: Use a union instead of an enum
+pub struct StatePaletteContainer<S> {
+    palette: StatePaletteImpl<S>,
     data: PackedBits,
 }
 
-impl<S: State> StatePalette<S> {
+impl<S: State> StatePaletteContainer<S> {
     pub fn new(len: usize, value: S) -> Self {
         Self {
-            palette: PaletteImpl::SingleValuePalette(SingleValuePalette { value }),
+            palette: StatePaletteImpl::SingleValuePalette(SingleValuePalette { value }),
             data: PackedBits::new(len, 0),
         }
     }
@@ -26,14 +103,14 @@ impl<S: State> StatePalette<S> {
     pub fn with_data(bits: usize, data: PackedBits, palette: &[S]) -> Self {
         match bits {
             0 => Self {
-                palette: PaletteImpl::SingleValuePalette(SingleValuePalette { value: palette[0] }),
+                palette: StatePaletteImpl::SingleValuePalette(SingleValuePalette { value: palette[0] }),
                 data,
             },
             1..=4 => {
                 let mut values = Vec::with_capacity(16);
                 values.copy_from_slice(palette);
                 Self {
-                    palette: PaletteImpl::LinearPalette(LinearPalette { bits: 4, values }),
+                    palette: StatePaletteImpl::LinearPalette(LinearPalette { bits: 4, values }),
                     data,
                 }
             }
@@ -45,7 +122,7 @@ impl<S: State> StatePalette<S> {
                     values.push(palette[i]);
                 }
                 Self {
-                    palette: PaletteImpl::MappedPalette(MappedPalette {
+                    palette: StatePaletteImpl::MappedPalette(MappedPalette {
                         indices,
                         inner: LinearPalette { values, bits },
                     }),
@@ -76,14 +153,22 @@ impl<S: State> StatePalette<S> {
     /// Safe as long as `i` is within bounds.
     pub unsafe fn set_unchecked(&mut self, i: usize, state: S) {
         match self.palette.index(state) {
-            IndexOrBits::Index(i) => self.data.set_unchecked(i, state.into()),
+            IndexOrBits::Index(v) => self.data.set_unchecked(i, v as u64),
             IndexOrBits::Bits(bits) => {
                 match bits {
                     1 => {
-                        let palette = PaletteImpl::LinearPalette(LinearPalette {
+                        let palette = match self.palette {
+                            StatePaletteImpl::SingleValuePalette(p) => p,
+                            StatePaletteImpl::LinearPalette(_) => std::hint::unreachable_unchecked(),
+                            StatePaletteImpl::MappedPalette(_) => std::hint::unreachable_unchecked(),
+                            StatePaletteImpl::Global => std::hint::unreachable_unchecked()
+                        };
+                        // SAFETY: we know it's not `Global` so this is fine
+                        let mut values = Vec::with_capacity(16);
+                        values.push(palette.value);
+                        let palette = StatePaletteImpl::LinearPalette(LinearPalette {
                             bits: 4,
-                            //SAFETY: This is fine because we know the palette isn't global (otherwise it wouldn't need to grow in size)
-                            values: self.palette.take_vec(),
+                            values
                         });
 
                         let mut new = Self {
@@ -101,12 +186,12 @@ impl<S: State> StatePalette<S> {
                     5 => {
                         // SAFETY: This is fine because the bits will only be 5 when the palette was a `LinearPalette`
                         let palette = match &mut self.palette {
-                            PaletteImpl::SingleValuePalette(_) => {
+                            StatePaletteImpl::SingleValuePalette(_) => {
                                 std::hint::unreachable_unchecked()
                             }
-                            PaletteImpl::LinearPalette(p) => p,
-                            PaletteImpl::MappedPalette(_) => std::hint::unreachable_unchecked(),
-                            PaletteImpl::Global => std::hint::unreachable_unchecked(),
+                            StatePaletteImpl::LinearPalette(p) => p,
+                            StatePaletteImpl::MappedPalette(_) => std::hint::unreachable_unchecked(),
+                            StatePaletteImpl::Global => std::hint::unreachable_unchecked(),
                         };
                         let mut indices = BTreeMap::new();
                         for i in 0..palette.values.len() {
@@ -116,7 +201,7 @@ impl<S: State> StatePalette<S> {
 
                         let values = std::mem::take(&mut palette.values);
 
-                        let palette = PaletteImpl::MappedPalette(MappedPalette {
+                        let palette = StatePaletteImpl::MappedPalette(MappedPalette {
                             indices,
                             inner: LinearPalette { values, bits },
                         });
@@ -135,17 +220,17 @@ impl<S: State> StatePalette<S> {
                     6..=8 => {
                         // SAFETY: This is fine because the bits will only be 6..8 when the palette was a `MappedPalette`
                         let mut palette = match &mut self.palette {
-                            PaletteImpl::SingleValuePalette(_) => {
+                            StatePaletteImpl::SingleValuePalette(_) => {
                                 std::hint::unreachable_unchecked()
                             }
-                            PaletteImpl::LinearPalette(_) => std::hint::unreachable_unchecked(),
-                            PaletteImpl::MappedPalette(p) => p,
-                            PaletteImpl::Global => std::hint::unreachable_unchecked(),
+                            StatePaletteImpl::LinearPalette(_) => std::hint::unreachable_unchecked(),
+                            StatePaletteImpl::MappedPalette(p) => p,
+                            StatePaletteImpl::Global => std::hint::unreachable_unchecked(),
                         };
                         palette.inner.bits = bits;
                     }
                     9 => {
-                        let palette = PaletteImpl::<S>::Global;
+                        let palette = StatePaletteImpl::<S>::Global;
                         let mut new = Self {
                             data: PackedBits::new(self.data.len(), 15),
                             palette,
@@ -167,41 +252,35 @@ impl<S: State> StatePalette<S> {
     }
 }
 
-enum PaletteImpl<S> {
+enum StatePaletteImpl<S> {
     SingleValuePalette(SingleValuePalette<S>),
     LinearPalette(LinearPalette<S>),
     MappedPalette(MappedPalette<S>),
     Global,
 }
 
-impl<S: State> PaletteImpl<S> {
+impl<S: State> StatePaletteImpl<S> {
     fn index(&mut self, state: S) -> IndexOrBits {
         match self {
-            PaletteImpl::SingleValuePalette(this) => this.index(state),
-            PaletteImpl::LinearPalette(this) => this.index(state),
-            PaletteImpl::MappedPalette(this) => this.index(state),
-            PaletteImpl::Global => IndexOrBits::Index((state.into() as u64) as usize),
+            StatePaletteImpl::SingleValuePalette(this) => this.index(state),
+            StatePaletteImpl::LinearPalette(this) => this.index(state),
+            StatePaletteImpl::MappedPalette(this) => this.index(state),
+            StatePaletteImpl::Global => IndexOrBits::Index(state.into() as u64),
         }
     }
     fn state(&self, index: usize) -> S {
         match self {
-            PaletteImpl::SingleValuePalette(this) => this.state(index),
-            PaletteImpl::LinearPalette(this) => this.state(index),
-            PaletteImpl::MappedPalette(this) => this.state(index),
-            PaletteImpl::Global => S::from(index),
+            StatePaletteImpl::SingleValuePalette(this) => this.state(index),
+            StatePaletteImpl::LinearPalette(this) => this.state(index),
+            StatePaletteImpl::MappedPalette(this) => this.state(index),
+            StatePaletteImpl::Global => S::from(index),
         }
     }
+}
 
-    /// # Safety
-    /// This is only safe if self isn't the varian't `Global`
-    unsafe fn take_vec(&mut self) -> Vec<S> {
-        match self {
-            PaletteImpl::SingleValuePalette(this) => (*this).into(),
-            PaletteImpl::LinearPalette(this) => std::mem::take(&mut this.values),
-            PaletteImpl::MappedPalette(this) => std::mem::take(&mut this.inner.values),
-            PaletteImpl::Global => std::hint::unreachable_unchecked(),
-        }
-    }
+enum BiomePaletteImpl<S> {
+    SingleValuePalette(SingleValuePalette<S>),
+    LinearPalette(LinearPalette<S>)
 }
 
 // S = block state
@@ -212,7 +291,7 @@ pub trait Palette<S>: Into<Vec<S>> {
 
 // TODO: Rename?
 pub enum IndexOrBits {
-    Index(usize),
+    Index(u64),
     Bits(usize),
 }
 
@@ -223,7 +302,9 @@ pub struct SingleValuePalette<S> {
 
 impl<S> Into<Vec<S>> for SingleValuePalette<S> {
     fn into(self) -> Vec<S> {
-        vec![self.value]
+        let mut vec = Vec::with_capacity(2);
+        vec.push(self.value);
+        vec
     }
 }
 
@@ -262,17 +343,16 @@ impl<S: State> Palette<S> for LinearPalette<S> {
             // SAFETY: This is fine because i can only be in bounds due to the for loop.
             unsafe {
                 if *self.values.get_unchecked(i) == state {
-                    return IndexOrBits::Index(i);
+                    return IndexOrBits::Index(i as u64);
                 }
             }
         }
         let len = self.values.len();
-        if self.values.len() < 16 {
-            // 2^4 = 16
+        if self.values.capacity() - self.values.len() > 0 {
             self.values.push(state);
-            IndexOrBits::Index(len)
+            IndexOrBits::Index(len as u64)
         } else {
-            IndexOrBits::Bits(5)
+            IndexOrBits::Bits(self.bits+1)
         }
     }
 
@@ -297,13 +377,13 @@ impl<S> Into<Vec<S>> for MappedPalette<S> {
 impl<S: State> Palette<S> for MappedPalette<S> {
     fn index(&mut self, state: S) -> IndexOrBits {
         match self.indices.get(&state) {
-            Some(v) => IndexOrBits::Index(*v),
+            Some(v) => IndexOrBits::Index(*v as u64),
             None => {
                 let initial_len = self.inner.values.len();
                 if self.inner.values.capacity() - initial_len > 0 {
                     self.inner.values.push(state);
                     self.indices.insert(state, self.inner.values.len());
-                    IndexOrBits::Index(initial_len)
+                    IndexOrBits::Index(initial_len as u64)
                 } else {
                     IndexOrBits::Bits(self.inner.bits + 1)
                 }
