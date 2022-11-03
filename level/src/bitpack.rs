@@ -44,7 +44,7 @@ impl PackedBits {
     /// Constructs a new `PackedBits`, panics if `bits` is equal to zero or if bits is greater than 64.
     #[inline]
     pub fn new(len: usize, bits: usize) -> Self {
-        if bits == 0 || bits > 64 {
+        if bits == 0 || bits > 32 {
             panic!("invalid amount of bits")
         }
         Self::new_unchecked(len, bits)
@@ -65,7 +65,7 @@ impl PackedBits {
 
     /// Constructs a new `PackedBits` with data, the data supplied has to already be packed.
     #[inline]
-    pub fn from_data(bits: usize, data: &[u64]) -> Self {
+    pub fn with_data(bits: usize, data: &[u64]) -> Self {
         let mut this = Self::new(data.len(), bits);
         this.data.copy_from_slice(data);
         this
@@ -73,7 +73,7 @@ impl PackedBits {
 
     /// Constructs a new `PackedBits` with data, the data supplied has to not have been packed yet.
     #[inline]
-    pub fn from_data_unpacked(bits: usize, data: &[u64]) -> Self {
+    pub fn with_data_unpacked(bits: usize, data: &[u64]) -> Self {
         let mut this = Self::new(data.len(), bits);
         for i in 0..data.len() {
             this.set(i, data[i]);
@@ -145,5 +145,30 @@ impl PackedBits {
             }
         }
         *self = new;
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::PackedBits;
+
+    #[test]
+    fn bitpack() {
+        let data = vec![0, 1, 2, 3, 4, 5, 6, 7];
+        let new_data = vec![7, 6, 5, 4, 3, 2, 1, 0];
+        let mut packedbits = PackedBits::with_data_unpacked(3, &data);
+        for bits in 3..=32 {
+            for i in 0..8 {
+                assert_eq!(packedbits.get(i).unwrap(), data[i]);
+                packedbits.set(i, new_data[i]);
+                assert_eq!(packedbits.get(i).unwrap(), new_data[i]);
+                packedbits.set(i, data[i])
+            }
+
+            if bits == 32 {
+                break;
+            }
+
+            packedbits.change_bits(bits+1);
+        }
     }
 }
