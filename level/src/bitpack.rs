@@ -91,7 +91,7 @@ impl PackedBits {
 
     #[inline]
     pub fn get(&self, i: usize) -> Option<u64> {
-        if i > self.len - 1 {
+        if i >= self.len  {
             return None;
         }
         // SAFETY: This is fine because we already checked that the index is within bounds.
@@ -106,7 +106,7 @@ impl PackedBits {
 
     #[inline]
     pub fn set(&mut self, i: usize, v: u64) {
-        if i > self.len - 1 {
+        if i >= self.len {
             panic!("out of bounds")
         }
         // SAFETY: This is fine because we already checked that the index is within bounds.
@@ -134,5 +134,16 @@ impl PackedBits {
         let val = self.get_unchecked(i);
         self.set_unchecked(i, v);
         val
+    }
+
+    pub fn change_bits(&mut self, bits: usize) {
+        let mut new = Self::new_unchecked(self.len, bits);
+        for i in 0..self.len {
+            // SAFETY: We know this is sound because 1. the lenghts are the same, and 2. the for loop makes sure `i` is in bounds
+            unsafe {
+                new.set_unchecked(i, self.get_unchecked(i))
+            }
+        }
+        *self = new;
     }
 }
