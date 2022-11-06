@@ -122,6 +122,22 @@ impl BiomePaletteContainer {
             }
         }
     }
+
+    pub fn swap(&mut self, i: usize, v: u64) -> u64 {
+        if i >= self.len {
+            panic!("out of bounds")
+        }
+        //SAFETY: This is safe because we just checked the bounds.
+        unsafe { self.swap_unchecked(i, v) }
+    }
+
+    /// # Safety
+    /// This method is safe as long as `i` is within bounds
+    pub unsafe fn swap_unchecked(&mut self, i: usize, v: u64) -> u64 {
+        let val = self.get_unchecked(i);
+        self.set_unchecked(i, v);
+        val
+    }
 }
 
 pub struct StatePaletteContainer {
@@ -158,7 +174,7 @@ impl StatePaletteContainer {
             0 => Self::new(len, value),
             1..=4 => {
                 let mut values = Vec::new();
-                values.reserve_exact(2usize.pow(4 as u32));
+                values.reserve_exact(2usize.pow(4));
                 let palette = LinearPalette { bits: 4, values };
                 Self {
                     palette: StatePalette::Linear {
@@ -300,9 +316,12 @@ impl StatePaletteContainer {
         if i >= self.len {
             panic!("out of bounds")
         }
+        //SAFETY: This is safe because we just checked the bounds.
         unsafe { self.swap_unchecked(i, v) }
     }
 
+    /// # Safety
+    /// This method is safe as long as `i` is within bounds
     pub unsafe fn swap_unchecked(&mut self, i: usize, v: u64) -> u64 {
         let val = self.get_unchecked(i);
         self.set_unchecked(i, v);
