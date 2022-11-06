@@ -1,3 +1,4 @@
+#[derive(Default)]
 pub struct PackedBits {
     len: usize,
     pub(crate) bits: usize,
@@ -91,7 +92,7 @@ impl PackedBits {
 
     #[inline]
     pub fn get(&self, i: usize) -> Option<u64> {
-        if i >= self.len  {
+        if i >= self.len {
             return None;
         }
         // SAFETY: This is fine because we already checked that the index is within bounds.
@@ -140,9 +141,7 @@ impl PackedBits {
         let mut new = Self::new_unchecked(self.len, bits);
         for i in 0..self.len {
             // SAFETY: We know this is sound because 1. the lenghts are the same, and 2. the for loop makes sure `i` is in bounds
-            unsafe {
-                new.set_unchecked(i, self.get_unchecked(i))
-            }
+            unsafe { new.set_unchecked(i, self.get_unchecked(i)) }
         }
         *self = new;
     }
@@ -168,7 +167,7 @@ mod tests {
                 break;
             }
 
-            packedbits.change_bits(bits+1);
+            packedbits.change_bits(bits + 1);
         }
     }
 }

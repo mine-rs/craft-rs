@@ -1,344 +1,341 @@
 use crate::bitpack::PackedBits;
-use craftrs_block::State;
-use std::{collections::BTreeMap, mem::MaybeUninit};
+use std::collections::BTreeMap;
 
-//TODO: Add encoding
+// TODO: Reduce code duplication (with macros?)
 
-//TODO: Add a BiomePalette struct
-
-//TODO: Refactor !
-
-//TODO: Tests !
-
-
-//TODO: Use a union instead of an enum
-pub struct BiomePaletteContainer<S> {
-    palette: BiomePaletteImpl<S>,
-    data: MaybeUninit<PackedBits>,
-    // This is used to only later initialise the `PackedBits`
-    len: usize, 
+pub struct BiomePaletteContainer {
+    palette: BiomePalette,
+    len: usize,
 }
 
-impl<S: State> BiomePaletteContainer<S> {
-    pub fn new(len: usize, value: S) -> Self {
-        Self { palette: BiomePaletteImpl::SingleValuePalette(SingleValuePalette {value }), data: MaybeUninit::uninit(), len }
-    }
+enum BiomePalette {
+    SingleValue(SingleValuePalette),
+    Linear {
+        palette: LinearPalette,
+        data: PackedBits,
+    },
+}
 
-    pub fn get(&self, i: usize) -> Option<S> {
-        match &self.palette {
-            BiomePaletteImpl::SingleValuePalette(p) => {
-                if i == 0 {
-                    return Some(p.value)
-                }
-                panic!("out of bounds")
-            }
-            BiomePaletteImpl::LinearPalette(p) => {
-                //SAFETY: We know this is safe as data is constructed when a LinearPalette is created.
-                let data = unsafe { self.data.assume_init_ref() };
-                Some(p.state(data.get(i)? as usize))
-            }
+impl BiomePaletteContainer {
+    #[inline]
+    pub fn new(len: usize, value: u64) -> Self {
+        Self {
+            palette: BiomePalette::SingleValue(SingleValuePalette(value)),
+            len,
         }
     }
 
-    pub fn set(&mut self, i: usize, state: S) {
-        if i > self.len-1 {
+    pub fn with_bits(len: usize, bits: usize, value: u64) -> Self {
+        if bits > 3 {
+            panic!("bits cannot exceed 3")
+        }
+        //SAFETY: This is safe because we just checked that bits is not greater than 3.
+        unsafe { Self::with_bits_unchecked(len, bits, value) }
+    }
+
+    /// # Safety
+    /// This method is safe as long as `bits` is not greater than 3.
+    pub unsafe fn with_bits_unchecked(len: usize, bits: usize, value: u64) -> Self {
+        match bits {
+            0 => Self::new(len, value),
+            // Here we assume bits is 1, 2, or 3
+            bits => {
+                let mut values = Vec::new();
+                values.reserve_exact(2usize.pow(bits as u32));
+                let palette = LinearPalette { bits, values };
+                Self {
+                    palette: BiomePalette::Linear {
+                        palette,
+                        data: PackedBits::new_unchecked(len, bits),
+                    },
+                    len,
+                }
+            }
+        }
+    }
+}
+
+impl BiomePaletteContainer {
+    pub fn get(&mut self, i: usize) -> u64 {
+        if i >= self.len {
             panic!("out of bounds")
         }
-        //SAFETY: This is fine becuase we checked that the index is in bounds 
-        unsafe {
-            self.set_unchecked(i, state)
+        //SAFETY: This is safe because we know i is in bounds.
+        unsafe { self.get_unchecked(i) }
+    }
+
+    /// # Safety
+    /// This method is safe as long as `i` is within bounds.
+    pub unsafe fn get_unchecked(&mut self, i: usize) -> u64 {
+        match &mut self.palette {
+            BiomePalette::SingleValue(v) => v.0,
+            BiomePalette::Linear { palette, data } => palette.value(data.get_unchecked(i) as usize),
         }
     }
 
-    pub unsafe fn set_unchecked(&mut self, i: usize, state: S) {
+    pub fn set(&mut self, i: usize, v: u64) {
+        if i >= self.len {
+            panic!("out of bounds")
+        }
+        // SAFETY: This is sound because we just checked the bounds
+        unsafe { self.set_unchecked(i, v) }
+    }
+
+    /// # Safety
+    /// This method is safe as long as `i` is within bounds.
+    pub unsafe fn set_unchecked(&mut self, i: usize, v: u64) {
         loop {
             match &mut self.palette {
-                BiomePaletteImpl::SingleValuePalette(p) => {
-                    if p.value == state {
-                        return
-                    };
-                    self.palette = BiomePaletteImpl::LinearPalette(LinearPalette {
-                        bits: 1,
-                        values: Vec::with_capacity(2),
-                    });
-                    self.data = MaybeUninit::new(PackedBits::new(self.len, 1))
+                BiomePalette::SingleValue(val) => match val.index(v) {
+                    IndexOrBits::Index(_) => return,
+                    IndexOrBits::Bits(bits) => {
+                        let mut values = Vec::new();
+                        values.reserve_exact(2);
+                        values.push(val.0);
+                        let palette = BiomePalette::Linear {
+                            palette: LinearPalette { bits, values },
+                            data: PackedBits::new(self.len, 1),
+                        };
+                        self.palette = palette
+                    }
                 },
-                BiomePaletteImpl::LinearPalette(p) => {
-                    loop {
-                        match p.index(state) {
-                            IndexOrBits::Index(index) => {
-                                let data = self.data.assume_init_mut();
-                                data.set_unchecked(i, index as u64)
-                            }, 
-                            IndexOrBits::Bits(bits) => {
-                                let mut packedbits = PackedBits::new(self.len, bits);
-                                for i in 0..self.data.assume_init_ref().len() {
-                                    packedbits.set_unchecked(i, packedbits.get_unchecked(i));
-                                }
-                                p.values.reserve_exact(2usize.pow(bits as u32) / 2)
-                            },
+                BiomePalette::Linear { palette, data } => match palette.index(v) {
+                    IndexOrBits::Index(v) => return data.set_unchecked(i, v),
+                    IndexOrBits::Bits(bits) => {
+                        if bits > 3 {
+                            panic!("bits cannot exceed 3")
                         }
+                        let mut values = std::mem::take(&mut palette.values);
+                        values.reserve_exact(values.capacity());
+                        data.change_bits(bits);
+
+                        let data = std::mem::take(data);
+
+                        let palette = BiomePalette::Linear {
+                            palette: LinearPalette { bits, values },
+                            data,
+                        };
+
+                        self.palette = palette
                     }
                 },
             }
         }
-
     }
 }
 
-// TODO: Use a union instead of an enum
-pub struct StatePaletteContainer<S> {
-    palette: StatePaletteImpl<S>,
-    data: PackedBits,
+pub struct StatePaletteContainer {
+    palette: StatePalette,
+    len: usize,
 }
 
-impl<S: State> StatePaletteContainer<S> {
-    pub fn new(len: usize, value: S) -> Self {
+enum StatePalette {
+    SingleValue(SingleValuePalette),
+    Linear {
+        palette: LinearPalette,
+        data: PackedBits,
+    },
+    Mapped {
+        palette: MappedPalette,
+        data: PackedBits,
+    },
+    Global {
+        data: PackedBits,
+    },
+}
+
+impl StatePaletteContainer {
+    #[inline]
+    pub fn new(len: usize, value: u64) -> Self {
         Self {
-            palette: StatePaletteImpl::SingleValuePalette(SingleValuePalette { value }),
-            data: PackedBits::new(len, 0),
+            palette: StatePalette::SingleValue(SingleValuePalette(value)),
+            len,
         }
     }
 
-    pub fn with_data(bits: usize, data: PackedBits, palette: &[S]) -> Self {
+    pub fn with_bits(len: usize, bits: usize, value: u64) -> Self {
         match bits {
-            0 => Self {
-                palette: StatePaletteImpl::SingleValuePalette(SingleValuePalette { value: palette[0] }),
-                data,
-            },
+            0 => Self::new(len, value),
             1..=4 => {
-                let mut values = Vec::with_capacity(16);
-                values.copy_from_slice(palette);
+                let mut values = Vec::new();
+                values.reserve_exact(2usize.pow(4 as u32));
+                let palette = LinearPalette { bits: 4, values };
                 Self {
-                    palette: StatePaletteImpl::LinearPalette(LinearPalette { bits: 4, values }),
-                    data,
+                    palette: StatePalette::Linear {
+                        palette,
+                        data: PackedBits::new_unchecked(len, 4),
+                    },
+                    len,
                 }
             }
             5..=8 => {
-                let mut values = Vec::with_capacity(32);
-                let mut indices = BTreeMap::new();
-                for i in 0..palette.len() {
-                    indices.insert(palette[i], i);
-                    values.push(palette[i]);
-                }
+                let mut values = Vec::new();
+                values.reserve_exact(2usize.pow(bits as u32));
+                let palette = LinearPalette { bits, values };
+                let palette = MappedPalette {
+                    indices: BTreeMap::new(),
+                    inner: palette,
+                };
                 Self {
-                    palette: StatePaletteImpl::MappedPalette(MappedPalette {
-                        indices,
-                        inner: LinearPalette { values, bits },
-                    }),
-                    data,
+                    palette: StatePalette::Mapped {
+                        palette,
+                        data: PackedBits::new_unchecked(len, bits),
+                    },
+                    len,
                 }
             }
-            _ => todo!(),
+            _ => Self {
+                palette: StatePalette::Global {
+                    data: PackedBits::new(len, bits),
+                },
+                len,
+            },
         }
     }
+}
 
-    pub fn get(&self, i: usize) -> Option<S> {
-        Some(self.palette.state(self.data.get(i)? as usize))
-    }
-
-    pub unsafe fn get_unchecked(&self, i: usize) -> S {
-        self.palette.state(self.data.get_unchecked(i) as usize)
-    }
-
-    //TODO: triple check if this is correct
-    pub fn set(&mut self, i: usize, state: S) {
-        if i > self.data.len() - 1 {
+impl StatePaletteContainer {
+    pub fn get(&mut self, i: usize) -> u64 {
+        if i >= self.len {
             panic!("out of bounds")
         }
-        // SAFETY: We just checked that is in bounds
-        unsafe { self.set_unchecked(i, state) }
+        //SAFETY: This is safe because we know i is in bounds.
+        unsafe { self.get_unchecked(i) }
     }
 
-    /// Safe as long as `i` is within bounds.
-    pub unsafe fn set_unchecked(&mut self, i: usize, state: S) {
-        match self.palette.index(state) {
-            IndexOrBits::Index(v) => self.data.set_unchecked(i, v as u64),
-            IndexOrBits::Bits(bits) => {
-                match bits {
-                    1 => {
-                        let palette = match self.palette {
-                            StatePaletteImpl::SingleValuePalette(p) => p,
-                            StatePaletteImpl::LinearPalette(_) => std::hint::unreachable_unchecked(),
-                            StatePaletteImpl::MappedPalette(_) => std::hint::unreachable_unchecked(),
-                            StatePaletteImpl::Global => std::hint::unreachable_unchecked()
-                        };
-                        // SAFETY: we know it's not `Global` so this is fine
-                        let mut values = Vec::with_capacity(16);
-                        values.push(palette.value);
-                        let palette = StatePaletteImpl::LinearPalette(LinearPalette {
-                            bits: 4,
-                            values
-                        });
+    /// # Safety
+    /// This method is safe as long as `i` is within bounds.
+    pub unsafe fn get_unchecked(&mut self, i: usize) -> u64 {
+        match &mut self.palette {
+            StatePalette::SingleValue(v) => v.0,
+            StatePalette::Linear { palette, data } => palette.value(data.get_unchecked(i) as usize),
+            StatePalette::Mapped { palette, data } => palette.value(data.get_unchecked(i) as usize),
+            StatePalette::Global { data } => u64::from(data.get_unchecked(i)),
+        }
+    }
 
-                        let mut new = Self {
-                            data: PackedBits::new(self.data.len(), bits),
-                            palette,
-                        };
-                        //SAFETY: This is sound because we know it is in bounds as we specified the len.
-                        for i in 0..self.data.len() {
-                            new.data.set_unchecked(i, self.data.get_unchecked(i))
-                        }
+    pub fn set(&mut self, i: usize, v: u64) {
+        if i >= self.len {
+            panic!("out of bounds")
+        }
+        // SAFETY: This is sound because we just checked the bounds
+        unsafe { self.set_unchecked(i, v) }
+    }
 
-                        *self = new
+    /// # Safety
+    /// This method is safe as long as `i` is within bounds.
+    pub unsafe fn set_unchecked(&mut self, i: usize, v: u64) {
+        loop {
+            match &mut self.palette {
+                StatePalette::SingleValue(val) => match val.index(v) {
+                    IndexOrBits::Index(_) => return,
+                    IndexOrBits::Bits(_) => {
+                        let mut values = Vec::new();
+                        values.reserve_exact(2usize.pow(4));
+                        values.push(val.0);
+                        let palette = StatePalette::Linear {
+                            palette: LinearPalette { bits: 4, values },
+                            data: PackedBits::new(self.len, 4),
+                        };
+                        self.palette = palette;
                     }
+                },
+                StatePalette::Linear { palette, data } => match palette.index(v) {
+                    IndexOrBits::Index(v) => return data.set(i, v),
+                    IndexOrBits::Bits(bits) => {
+                        debug_assert_eq!(bits, 5);
+                        // We know bits will always be 5
+                        data.change_bits(bits);
+                        let data = std::mem::take(data);
+                        let mut values = std::mem::take(&mut palette.values);
+                        // Here we double the capacity so that it is equal to 2 to the power of 5
+                        values.reserve_exact(2usize.pow(4)); // values.capacity() should be equal to 2usize.pow(4)
+                        let palette = StatePalette::Mapped {
+                            palette: MappedPalette {
+                                indices: BTreeMap::new(),
+                                inner: LinearPalette { values, bits: 5 },
+                            },
+                            data,
+                        };
 
-                    5 => {
-                        // SAFETY: This is fine because the bits will only be 5 when the palette was a `LinearPalette`
-                        let palette = match &mut self.palette {
-                            StatePaletteImpl::SingleValuePalette(_) => {
-                                std::hint::unreachable_unchecked()
+                        self.palette = palette;
+                    }
+                },
+                StatePalette::Mapped { palette, data } => match palette.index(v) {
+                    IndexOrBits::Index(v) => return data.set_unchecked(i, v),
+                    IndexOrBits::Bits(bits) => {
+                        let palette: StatePalette = if bits == 9 {
+                            let mut new_data = PackedBits::new(self.len, 15);
+                            for i in 0..self.len {
+                                //SAFETY: This is fine because the for loop makes sure `i` stays in bounds
+                                new_data.set_unchecked(i, self.get_unchecked(i));
                             }
-                            StatePaletteImpl::LinearPalette(p) => p,
-                            StatePaletteImpl::MappedPalette(_) => std::hint::unreachable_unchecked(),
-                            StatePaletteImpl::Global => std::hint::unreachable_unchecked(),
-                        };
-                        let mut indices = BTreeMap::new();
-                        for i in 0..palette.values.len() {
-                            let value = palette.values[i];
-                            indices.insert(value, i);
-                        }
 
-                        let values = std::mem::take(&mut palette.values);
+                            StatePalette::Global { data: new_data }
+                        } else {
+                            data.change_bits(bits);
+                            let data = std::mem::take(data);
 
-                        let palette = StatePaletteImpl::MappedPalette(MappedPalette {
-                            indices,
-                            inner: LinearPalette { values, bits },
-                        });
-
-                        let mut new = Self {
-                            data: PackedBits::new(self.data.len(), bits),
-                            palette,
-                        };
-                        //SAFETY: This is sound because we know it is in bounds as we specified the len.
-
-                        for i in 0..self.data.len() {
-                            new.data.set_unchecked(i, self.data.get_unchecked(i))
-                        }
-                        *self = new
-                    }
-                    6..=8 => {
-                        // SAFETY: This is fine because the bits will only be 6..8 when the palette was a `MappedPalette`
-                        let mut palette = match &mut self.palette {
-                            StatePaletteImpl::SingleValuePalette(_) => {
-                                std::hint::unreachable_unchecked()
+                            let linear = LinearPalette {
+                                values: std::mem::take(&mut palette.inner.values),
+                                bits,
+                            };
+                            StatePalette::Mapped {
+                                palette: MappedPalette {
+                                    indices: std::mem::take(&mut palette.indices),
+                                    inner: linear,
+                                },
+                                data,
                             }
-                            StatePaletteImpl::LinearPalette(_) => std::hint::unreachable_unchecked(),
-                            StatePaletteImpl::MappedPalette(p) => p,
-                            StatePaletteImpl::Global => std::hint::unreachable_unchecked(),
                         };
-                        palette.inner.bits = bits;
+                        self.palette = palette;
                     }
-                    9 => {
-                        let palette = StatePaletteImpl::<S>::Global;
-                        let mut new = Self {
-                            data: PackedBits::new(self.data.len(), 15),
-                            palette,
-                        };
-
-                        for i in 0..self.data.len() {
-                            //SAFETY: Because of the way the for loop is defined, i will alwasys be in bounds.
-                            let state = self.get_unchecked(i);
-                            new.data.set(i, state.into())
-                        }
-                        *self = new
-                    }
-                    // This is sound because we know bits can only be 5, 6..=8, or 9.
-                    _ => std::hint::unreachable_unchecked(),
-                }
-                self.set_unchecked(i, state)
+                },
+                StatePalette::Global { data } => return data.set_unchecked(i, v.into()),
             }
         }
     }
 }
 
-enum StatePaletteImpl<S> {
-    SingleValuePalette(SingleValuePalette<S>),
-    LinearPalette(LinearPalette<S>),
-    MappedPalette(MappedPalette<S>),
-    Global,
-}
-
-impl<S: State> StatePaletteImpl<S> {
-    fn index(&mut self, state: S) -> IndexOrBits {
-        match self {
-            StatePaletteImpl::SingleValuePalette(this) => this.index(state),
-            StatePaletteImpl::LinearPalette(this) => this.index(state),
-            StatePaletteImpl::MappedPalette(this) => this.index(state),
-            StatePaletteImpl::Global => IndexOrBits::Index(state.into() as u64),
-        }
-    }
-    fn state(&self, index: usize) -> S {
-        match self {
-            StatePaletteImpl::SingleValuePalette(this) => this.state(index),
-            StatePaletteImpl::LinearPalette(this) => this.state(index),
-            StatePaletteImpl::MappedPalette(this) => this.state(index),
-            StatePaletteImpl::Global => S::from(index),
-        }
-    }
-}
-
-enum BiomePaletteImpl<S> {
-    SingleValuePalette(SingleValuePalette<S>),
-    LinearPalette(LinearPalette<S>)
-}
-
-// S = block state
-pub trait Palette<S>: Into<Vec<S>> {
-    fn index(&mut self, state: S) -> IndexOrBits;
-    fn state(&self, index: usize) -> S;
+trait Palette {
+    fn index(&mut self, value: u64) -> IndexOrBits;
+    fn value(&self, index: usize) -> u64;
 }
 
 // TODO: Rename?
-pub enum IndexOrBits {
+enum IndexOrBits {
     Index(u64),
     Bits(usize),
 }
 
 #[derive(Copy, Clone)]
-pub struct SingleValuePalette<S> {
-    pub(crate) value: S,
-}
+struct SingleValuePalette(u64);
 
-impl<S> Into<Vec<S>> for SingleValuePalette<S> {
-    fn into(self) -> Vec<S> {
-        let mut vec = Vec::with_capacity(2);
-        vec.push(self.value);
-        vec
-    }
-}
-
-impl<S: State> Palette<S> for SingleValuePalette<S> {
-    fn index(&mut self, state: S) -> IndexOrBits {
-        if self.value == state {
+impl Palette for SingleValuePalette {
+    fn index(&mut self, state: u64) -> IndexOrBits {
+        if self.0 == state {
             IndexOrBits::Index(0)
         } else {
             IndexOrBits::Bits(1)
         }
     }
 
-    fn state(&self, index: usize) -> S {
+    fn value(&self, index: usize) -> u64 {
         if index == 0 {
-            self.value
+            self.0
         } else {
             panic!("index out of bounds")
         }
     }
 }
 
-pub struct LinearPalette<S> {
-    pub(crate) values: Vec<S>,
+struct LinearPalette {
+    pub(crate) values: Vec<u64>,
     pub(crate) bits: usize,
 }
 
-impl<S> Into<Vec<S>> for LinearPalette<S> {
-    fn into(self) -> Vec<S> {
-        self.values
-    }
-}
-
-impl<S: State> Palette<S> for LinearPalette<S> {
-    fn index(&mut self, state: S) -> IndexOrBits {
+impl Palette for LinearPalette {
+    fn index(&mut self, state: u64) -> IndexOrBits {
         for i in 0..self.values.len() {
             // SAFETY: This is fine because i can only be in bounds due to the for loop.
             unsafe {
@@ -347,40 +344,37 @@ impl<S: State> Palette<S> for LinearPalette<S> {
                 }
             }
         }
+
         let len = self.values.len();
-        if self.values.capacity() - self.values.len() > 0 {
+        if self.values.capacity() > len {
+            debug_assert_eq!(self.values.capacity(), 2usize.pow(self.bits as u32));
             self.values.push(state);
             IndexOrBits::Index(len as u64)
         } else {
-            IndexOrBits::Bits(self.bits+1)
+            IndexOrBits::Bits(self.bits + 1)
         }
     }
 
     #[inline]
-    fn state(&self, index: usize) -> S {
+    fn value(&self, index: usize) -> u64 {
         self.values[index]
     }
 }
 
 /// This makes the `index` method faster at the cost of memory usage.
-pub struct MappedPalette<S> {
-    pub(crate) indices: BTreeMap<S, usize>,
-    pub(crate) inner: LinearPalette<S>,
+struct MappedPalette {
+    pub(crate) indices: BTreeMap<u64, usize>,
+    pub(crate) inner: LinearPalette,
 }
 
-impl<S> Into<Vec<S>> for MappedPalette<S> {
-    fn into(self) -> Vec<S> {
-        self.inner.values
-    }
-}
-
-impl<S: State> Palette<S> for MappedPalette<S> {
-    fn index(&mut self, state: S) -> IndexOrBits {
+impl Palette for MappedPalette {
+    fn index(&mut self, state: u64) -> IndexOrBits {
         match self.indices.get(&state) {
             Some(v) => IndexOrBits::Index(*v as u64),
             None => {
                 let initial_len = self.inner.values.len();
-                if self.inner.values.capacity() - initial_len > 0 {
+                if self.inner.values.capacity() > initial_len {
+                    debug_assert_eq!(self.inner.values.capacity(), 2usize.pow(self.inner.bits as u32));
                     self.inner.values.push(state);
                     self.indices.insert(state, self.inner.values.len());
                     IndexOrBits::Index(initial_len as u64)
@@ -391,7 +385,42 @@ impl<S: State> Palette<S> for MappedPalette<S> {
         }
     }
 
-    fn state(&self, index: usize) -> S {
-        self.inner.state(index)
+    fn value(&self, index: usize) -> u64 {
+        self.inner.value(index)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StatePaletteContainer, BiomePaletteContainer};
+
+    #[test]
+    fn state() {
+        let mut data = Vec::new();
+        for i in 0..512 {
+            data.push(i)
+        }
+        data.reverse();
+        let mut container = StatePaletteContainer::new(512, 0);
+        for i in 0..512 {
+            container.set(i, data[i]);
+            assert_eq!(container.get(i), data[i]);
+            for j in 0..=i {
+                assert_eq!(container.get(j), data[j]) 
+            }
+        }
+    }
+
+    #[test]
+    fn biome() {
+        let data = vec![7, 6, 5, 4, 3, 2, 1, 0];
+        let mut container = BiomePaletteContainer::new(8, 0);
+        for i in 0..8 {
+            container.set(i, data[i]);
+            assert_eq!(container.get(i), data[i]);
+            for j in 0..=i {
+                assert_eq!(container.get(j), data[j])
+            }
+        }
     }
 }

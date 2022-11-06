@@ -1,3 +1,3 @@
-pub mod bitpack;
+mod bitpack;
 pub mod chunk;
 pub mod palette;
