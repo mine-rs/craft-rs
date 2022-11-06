@@ -295,6 +295,19 @@ impl StatePaletteContainer {
             }
         }
     }
+
+    pub fn swap(&mut self, i: usize, v: u64) -> u64 {
+        if i >= self.len {
+            panic!("out of bounds")
+        }
+        unsafe { self.swap_unchecked(i, v) }
+    }
+
+    pub unsafe fn swap_unchecked(&mut self, i: usize, v: u64) -> u64 {
+        let val = self.get_unchecked(i);
+        self.set_unchecked(i, v);
+        val
+    }
 }
 
 trait Palette {
@@ -374,7 +387,10 @@ impl Palette for MappedPalette {
             None => {
                 let initial_len = self.inner.values.len();
                 if self.inner.values.capacity() > initial_len {
-                    debug_assert_eq!(self.inner.values.capacity(), 2usize.pow(self.inner.bits as u32));
+                    debug_assert_eq!(
+                        self.inner.values.capacity(),
+                        2usize.pow(self.inner.bits as u32)
+                    );
                     self.inner.values.push(state);
                     self.indices.insert(state, self.inner.values.len());
                     IndexOrBits::Index(initial_len as u64)
@@ -392,7 +408,7 @@ impl Palette for MappedPalette {
 
 #[cfg(test)]
 mod tests {
-    use super::{StatePaletteContainer, BiomePaletteContainer};
+    use super::{BiomePaletteContainer, StatePaletteContainer};
 
     #[test]
     fn state() {
@@ -406,7 +422,7 @@ mod tests {
             container.set(i, data[i]);
             assert_eq!(container.get(i), data[i]);
             for j in 0..=i {
-                assert_eq!(container.get(j), data[j]) 
+                assert_eq!(container.get(j), data[j])
             }
         }
     }

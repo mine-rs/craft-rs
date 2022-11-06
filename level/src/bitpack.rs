@@ -38,10 +38,10 @@ impl AsRef<Vec<u64>> for PackedBits {
 }
 
 impl PackedBits {
-    #[inline]
-    pub fn len(&self) -> usize {
-        self.len
-    }
+    //#[inline]
+    //pub fn len(&self) -> usize {
+    //    self.len
+    //}
     /// Constructs a new `PackedBits`, panics if `bits` is equal to zero or if bits is greater than 64.
     #[inline]
     pub fn new(len: usize, bits: usize) -> Self {
@@ -66,6 +66,7 @@ impl PackedBits {
 
     /// Constructs a new `PackedBits` with data, the data supplied has to already be packed.
     #[inline]
+    #[allow(dead_code)] // this will be useful for encoding/decoding
     pub fn with_data(bits: usize, data: &[u64]) -> Self {
         let mut this = Self::new(data.len(), bits);
         this.data.copy_from_slice(data);
@@ -74,6 +75,7 @@ impl PackedBits {
 
     /// Constructs a new `PackedBits` with data, the data supplied has to not have been packed yet.
     #[inline]
+    #[allow(dead_code)] // this will be useful for encoding/decoding
     pub fn with_data_unpacked(bits: usize, data: &[u64]) -> Self {
         let mut this = Self::new(data.len(), bits);
         for i in 0..data.len() {
@@ -122,20 +124,20 @@ impl PackedBits {
         *num |= v << bi;
     }
 
-    #[inline]
-    pub fn swap(&mut self, i: usize, v: u64) -> Option<u64> {
-        let val = self.get(i)?;
-        //SAFETY: This is fine because the self.get call already checked bounds.
-        unsafe { self.set_unchecked(i, v) };
-        Some(val)
-    }
-
-    #[inline]
-    pub unsafe fn swap_unchecked(&mut self, i: usize, v: u64) -> u64 {
-        let val = self.get_unchecked(i);
-        self.set_unchecked(i, v);
-        val
-    }
+    //#[inline]
+    //pub fn swap(&mut self, i: usize, v: u64) -> Option<u64> {
+    //    let val = self.get(i)?;
+    //    //SAFETY: This is fine because the self.get call already checked bounds.
+    //    unsafe { self.set_unchecked(i, v) };
+    //    Some(val)
+    //}
+//
+    //#[inline]
+    //pub unsafe fn swap_unchecked(&mut self, i: usize, v: u64) -> u64 {
+    //    let val = self.get_unchecked(i);
+    //    self.set_unchecked(i, v);
+    //    val
+    //}
 
     pub fn change_bits(&mut self, bits: usize) {
         let mut new = Self::new_unchecked(self.len, bits);
