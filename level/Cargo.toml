@@ -7,5 +7,4 @@ edition = "2021"
 
 [dependencies]
 thiserror = "1.0.37"
-craftrs-block = { path = "../block", version = "0.0.0-beta.0" }
 miners = { git = "https://github.com/mine-rs/mine-rs" }
