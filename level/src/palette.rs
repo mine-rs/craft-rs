@@ -3,41 +3,39 @@ use std::collections::BTreeMap;
 
 // TODO: Reduce code duplication (with macros?)
 
-pub struct BiomePaletteContainer {
-    palette: BiomePalette,
-    len: usize,
+pub struct BiomePaletteContainer<const N: usize> {
+    palette: BiomePalette<N>,
 }
 
-enum BiomePalette {
+enum BiomePalette<const N: usize> {
     SingleValue(SingleValuePalette),
     Linear {
         palette: LinearPalette,
-        data: PackedBits,
+        data: PackedBits<N>,
     },
 }
 
-impl BiomePaletteContainer {
+impl<const N: usize> BiomePaletteContainer<N> {
     #[inline]
-    pub fn new(len: usize, value: u64) -> Self {
+    pub fn new(value: u64) -> Self {
         Self {
             palette: BiomePalette::SingleValue(SingleValuePalette(value)),
-            len,
         }
     }
 
-    pub fn with_bits(len: usize, bits: usize, value: u64) -> Self {
+    pub fn with_bits(bits: usize, value: u64) -> Self {
         if bits > 3 {
             panic!("bits cannot exceed 3")
         }
         //SAFETY: This is safe because we just checked that bits is not greater than 3.
-        unsafe { Self::with_bits_unchecked(len, bits, value) }
+        unsafe { Self::with_bits_unchecked(bits, value) }
     }
 
     /// # Safety
     /// This method is safe as long as `bits` is not greater than 3.
-    pub unsafe fn with_bits_unchecked(len: usize, bits: usize, value: u64) -> Self {
+    pub unsafe fn with_bits_unchecked(bits: usize, value: u64) -> Self {
         match bits {
-            0 => Self::new(len, value),
+            0 => Self::new(value),
             // Here we assume bits is 1, 2, or 3
             bits => {
                 let mut values = Vec::new();
@@ -46,18 +44,17 @@ impl BiomePaletteContainer {
                 Self {
                     palette: BiomePalette::Linear {
                         palette,
-                        data: PackedBits::new_unchecked(len, bits),
+                        data: PackedBits::new_unchecked(bits),
                     },
-                    len,
                 }
             }
         }
     }
 }
 
-impl BiomePaletteContainer {
+impl<const N: usize> BiomePaletteContainer<N> {
     pub fn get(&mut self, i: usize) -> u64 {
-        if i >= self.len {
+        if i >= N {
             panic!("out of bounds")
         }
         //SAFETY: This is safe because we know i is in bounds.
@@ -74,7 +71,7 @@ impl BiomePaletteContainer {
     }
 
     pub fn set(&mut self, i: usize, v: u64) {
-        if i >= self.len {
+        if i >= N {
             panic!("out of bounds")
         }
         // SAFETY: This is sound because we just checked the bounds
@@ -94,7 +91,7 @@ impl BiomePaletteContainer {
                         values.push(val.0);
                         let palette = BiomePalette::Linear {
                             palette: LinearPalette { bits, values },
-                            data: PackedBits::new(self.len, 1),
+                            data: PackedBits::new(1),
                         };
                         self.palette = palette
                     }
@@ -124,7 +121,7 @@ impl BiomePaletteContainer {
     }
 
     pub fn swap(&mut self, i: usize, v: u64) -> u64 {
-        if i >= self.len {
+        if i >= N {
             panic!("out of bounds")
         }
         //SAFETY: This is safe because we just checked the bounds.
@@ -140,38 +137,36 @@ impl BiomePaletteContainer {
     }
 }
 
-pub struct StatePaletteContainer {
-    palette: StatePalette,
-    len: usize,
+pub struct StatePaletteContainer<const N: usize> {
+    palette: StatePalette<N>,
 }
 
-enum StatePalette {
+enum StatePalette<const N: usize> {
     SingleValue(SingleValuePalette),
     Linear {
         palette: LinearPalette,
-        data: PackedBits,
+        data: PackedBits<N>,
     },
     Mapped {
         palette: MappedPalette,
-        data: PackedBits,
+        data: PackedBits<N>,
     },
     Global {
-        data: PackedBits,
+        data: PackedBits<N>,
     },
 }
 
-impl StatePaletteContainer {
+impl<const N: usize> StatePaletteContainer<N> {
     #[inline]
-    pub fn new(len: usize, value: u64) -> Self {
+    pub fn new(value: u64) -> Self {
         Self {
             palette: StatePalette::SingleValue(SingleValuePalette(value)),
-            len,
         }
     }
 
-    pub fn with_bits(len: usize, bits: usize, value: u64) -> Self {
+    pub fn with_bits(bits: usize, value: u64) -> Self {
         match bits {
-            0 => Self::new(len, value),
+            0 => Self::new(value),
             1..=4 => {
                 let mut values = Vec::new();
                 values.reserve_exact(2usize.pow(4));
@@ -179,9 +174,8 @@ impl StatePaletteContainer {
                 Self {
                     palette: StatePalette::Linear {
                         palette,
-                        data: PackedBits::new_unchecked(len, 4),
+                        data: PackedBits::new_unchecked(4),
                     },
-                    len,
                 }
             }
             5..=8 => {
@@ -195,24 +189,22 @@ impl StatePaletteContainer {
                 Self {
                     palette: StatePalette::Mapped {
                         palette,
-                        data: PackedBits::new_unchecked(len, bits),
+                        data: PackedBits::new_unchecked(bits),
                     },
-                    len,
                 }
             }
             _ => Self {
                 palette: StatePalette::Global {
-                    data: PackedBits::new(len, bits),
+                    data: PackedBits::new(bits),
                 },
-                len,
             },
         }
     }
 }
 
-impl StatePaletteContainer {
+impl<const N: usize> StatePaletteContainer<N> {
     pub fn get(&mut self, i: usize) -> u64 {
-        if i >= self.len {
+        if i >= N {
             panic!("out of bounds")
         }
         //SAFETY: This is safe because we know i is in bounds.
@@ -231,7 +223,7 @@ impl StatePaletteContainer {
     }
 
     pub fn set(&mut self, i: usize, v: u64) {
-        if i >= self.len {
+        if i >= N {
             panic!("out of bounds")
         }
         // SAFETY: This is sound because we just checked the bounds
@@ -251,7 +243,7 @@ impl StatePaletteContainer {
                         values.push(val.0);
                         let palette = StatePalette::Linear {
                             palette: LinearPalette { bits: 4, values },
-                            data: PackedBits::new(self.len, 4),
+                            data: PackedBits::new(4),
                         };
                         self.palette = palette;
                     }
@@ -280,9 +272,9 @@ impl StatePaletteContainer {
                 StatePalette::Mapped { palette, data } => match palette.index(v) {
                     IndexOrBits::Index(v) => return data.set_unchecked(i, v),
                     IndexOrBits::Bits(bits) => {
-                        let palette: StatePalette = if bits == 9 {
-                            let mut new_data = PackedBits::new(self.len, 15);
-                            for i in 0..self.len {
+                        let palette: StatePalette<N> = if bits == 9 {
+                            let mut new_data = PackedBits::new(15);
+                            for i in 0..N {
                                 //SAFETY: This is fine because the for loop makes sure `i` stays in bounds
                                 new_data.set_unchecked(i, self.get_unchecked(i));
                             }
@@ -313,7 +305,7 @@ impl StatePaletteContainer {
     }
 
     pub fn swap(&mut self, i: usize, v: u64) -> u64 {
-        if i >= self.len {
+        if i >= N {
             panic!("out of bounds")
         }
         //SAFETY: This is safe because we just checked the bounds.
@@ -436,7 +428,7 @@ mod tests {
             data.push(i)
         }
         data.reverse();
-        let mut container = StatePaletteContainer::new(512, 0);
+        let mut container = StatePaletteContainer::<512>::new(0);
         for i in 0..512 {
             container.set(i, data[i]);
             assert_eq!(container.get(i), data[i]);
@@ -449,7 +441,7 @@ mod tests {
     #[test]
     fn biome() {
         let data = vec![7, 6, 5, 4, 3, 2, 1, 0];
-        let mut container = BiomePaletteContainer::new(8, 0);
+        let mut container = BiomePaletteContainer::<8>::new(0);
         for i in 0..8 {
             container.set(i, data[i]);
             assert_eq!(container.get(i), data[i]);
