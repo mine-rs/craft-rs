@@ -1,4 +1,4 @@
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct PackedBits<const N: usize> {
     pub(crate) bits: usize,
     mask: u64,
@@ -37,7 +37,6 @@ impl<const N: usize> AsRef<Vec<u64>> for PackedBits<N> {
 }
 
 impl<const N: usize> PackedBits<N> {
-    //#[inline]
     //pub fn len(&self) -> usize {
     //    self.len
     //}
@@ -56,7 +55,7 @@ impl<const N: usize> PackedBits<N> {
         let rlen = (N + vpe - 1) / vpe; // The real length of the vec
         Self {
             bits,
-            mask: (1 << bits) - 1,
+            mask: ((((1 as u64) << bits) - 1) as u64).rotate_right(bits as u32),
             data: vec![0; rlen],
             vpe: 64 / bits,
         }
@@ -86,7 +85,7 @@ impl<const N: usize> PackedBits<N> {
     fn calculate_index(&self, i: usize) -> (usize, u64, usize) {
         let vi = i / self.vpe; // vec index
         let bo = i % self.vpe * self.bits; // bit offset
-        let bits = self.mask << bo;
+        let bits = self.mask >> bo;
         (vi, bits, bo)
     }
 
@@ -102,7 +101,7 @@ impl<const N: usize> PackedBits<N> {
     #[inline]
     pub unsafe fn get_unchecked(&self, i: usize) -> u64 {
         let (vi, bits, bo) = self.calculate_index(i);
-        (self.data.get_unchecked(vi) & bits) >> bo
+        (((self.data.get_unchecked(vi) & bits) << bo) as u64).rotate_left(self.bits as u32)
     }
 
     #[inline]
@@ -116,10 +115,10 @@ impl<const N: usize> PackedBits<N> {
 
     #[inline]
     pub unsafe fn set_unchecked(&mut self, i: usize, v: u64) {
-        let (vi, bits, bi) = self.calculate_index(i);
+        let (vi, bits, bo) = self.calculate_index(i);
         let num = self.data.get_unchecked_mut(vi);
-        *num &= !bits;
-        *num |= v << bi;
+        *num &= !bits; // set the value to zero
+        *num |= v.rotate_right(self.bits as u32) >> bo;
     }
 
     //#[inline]
