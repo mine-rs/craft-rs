@@ -2,7 +2,7 @@ use crate::bitpack::PackedBits;
 use std::collections::BTreeMap;
 
 
-pub trait PaletteContainer<const N: usize> {
+pub unsafe trait PaletteContainer<const N: usize> {
     fn new(value: u64) -> Self;
     fn with_bits(bits: usize, value: u64) -> Self;
 
@@ -61,7 +61,7 @@ enum BiomePalette<const N: usize> {
     },
 }
 
-impl<const N: usize> PaletteContainer<N> for BiomePaletteContainer<N> {
+unsafe impl<const N: usize> PaletteContainer<N> for BiomePaletteContainer<N> {
     fn new(value: u64) -> Self {
         Self {
             palette: BiomePalette::SingleValue(SingleValuePalette(value)),
@@ -150,7 +150,7 @@ pub struct StatePaletteContainer<const N: usize> {
     palette: StatePalette<N>,
 }
 
-impl<const N: usize> PaletteContainer<N> for StatePaletteContainer<N> {
+unsafe impl<const N: usize> PaletteContainer<N> for StatePaletteContainer<N> {
     fn new(value: u64) -> Self {
         Self {
             palette: StatePalette::SingleValue(SingleValuePalette(value)),
