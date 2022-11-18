@@ -1,6 +1,52 @@
 use crate::bitpack::PackedBits;
 use std::collections::BTreeMap;
 
+
+pub unsafe trait PaletteContainer<const N: usize> {
+    fn new(value: u64) -> Self;
+    fn with_bits(bits: usize, value: u64) -> Self;
+
+    fn get(&mut self, i: usize) -> u64 {
+        if i >= N {
+            panic!("out of bounds")
+        }
+        //SAFETY: This is safe because we know i is in bounds.
+        unsafe { self.get_unchecked(i) }
+    }
+
+    /// # Safety
+    /// This method is safe as long as `i` is within bounds.
+    unsafe fn get_unchecked(&mut self, i: usize) -> u64;
+    
+    fn set(&mut self, i: usize, v: u64) {
+        if i >= N {
+            panic!("out of bounds")
+        }
+        // SAFETY: This is sound because we just checked the bounds
+        unsafe { self.set_unchecked(i, v) }
+    }
+
+    /// # Safety
+    /// This method is safe as long as `i` is within bounds.
+    unsafe fn set_unchecked(&mut self, i: usize, v: u64);
+
+    fn swap(&mut self, i: usize, v: u64) -> u64 {
+        if i >= N {
+            panic!("out of bounds")
+        }
+        //SAFETY: This is safe because we just checked the bounds.
+        unsafe { self.swap_unchecked(i, v) }
+    }
+
+    /// # Safety
+    /// This method is safe as long as `i` is within bounds
+    unsafe fn swap_unchecked(&mut self, i: usize, v: u64) -> u64 {
+        let val = self.get_unchecked(i);
+        self.set_unchecked(i, v);
+        val
+    }
+}
+
 // TODO: Reduce code duplication (with macros?)
 
 pub struct BiomePaletteContainer<const N: usize> {
@@ -13,6 +59,70 @@ enum BiomePalette<const N: usize> {
         palette: LinearPalette,
         data: PackedBits<N>,
     },
+}
+
+// SAFETY: This is fine because we uphold all of the invariants in the default trait implementations
+unsafe impl<const N: usize> PaletteContainer<N> for BiomePaletteContainer<N> {
+    fn new(value: u64) -> Self {
+        Self {
+            palette: BiomePalette::SingleValue(SingleValuePalette(value)),
+        }
+    }
+
+    fn with_bits(bits: usize, value: u64) -> Self {
+        if bits > 3 {
+            panic!("bits cannot exceed 3")
+        }
+        //SAFETY: This is safe because we just checked that bits is not greater than 3.
+        unsafe { Self::with_bits_unchecked(bits, value) }
+    }
+
+    unsafe fn get_unchecked(&mut self, i: usize) -> u64 {
+        match &mut self.palette {
+            BiomePalette::SingleValue(v) => v.0,
+            BiomePalette::Linear { palette, data } => palette.value(data.get_unchecked(i) as usize),
+        }
+    }
+
+    unsafe fn set_unchecked(&mut self, i: usize, v: u64) {
+        loop {
+            match &mut self.palette {
+                BiomePalette::SingleValue(val) => match val.index(v) {
+                    IndexOrBits::Index(_) => return,
+                    IndexOrBits::Bits(bits) => {
+                        let mut values = Vec::new();
+                        values.reserve_exact(2);
+                        values.push(val.0);
+                        let palette = BiomePalette::Linear {
+                            palette: LinearPalette { bits, values },
+                            data: PackedBits::new(1),
+                        };
+                        self.palette = palette
+                    }
+                },
+                BiomePalette::Linear { palette, data } => match palette.index(v) {
+                    IndexOrBits::Index(v) => return data.set_unchecked(i, v),
+                    IndexOrBits::Bits(bits) => {
+                        if bits > 3 {
+                            panic!("bits cannot exceed 3")
+                        }
+                        let mut values = std::mem::take(&mut palette.values);
+                        values.reserve_exact(values.capacity());
+                        data.change_bits(bits);
+
+                        let data = std::mem::take(data);
+
+                        let palette = BiomePalette::Linear {
+                            palette: LinearPalette { bits, values },
+                            data,
+                        };
+
+                        self.palette = palette
+                    }
+                },
+            }
+        }
+    }
 }
 
 impl<const N: usize> BiomePaletteContainer<N> {
@@ -141,30 +251,14 @@ pub struct StatePaletteContainer<const N: usize> {
     palette: StatePalette<N>,
 }
 
-enum StatePalette<const N: usize> {
-    SingleValue(SingleValuePalette),
-    Linear {
-        palette: LinearPalette,
-        data: PackedBits<N>,
-    },
-    Mapped {
-        palette: MappedPalette,
-        data: PackedBits<N>,
-    },
-    Global {
-        data: PackedBits<N>,
-    },
-}
-
-impl<const N: usize> StatePaletteContainer<N> {
-    #[inline]
-    pub fn new(value: u64) -> Self {
+unsafe impl<const N: usize> PaletteContainer<N> for StatePaletteContainer<N> {
+    fn new(value: u64) -> Self {
         Self {
             palette: StatePalette::SingleValue(SingleValuePalette(value)),
         }
     }
 
-    pub fn with_bits(bits: usize, value: u64) -> Self {
+    fn with_bits(bits: usize, value: u64) -> Self {
         match bits {
             0 => Self::new(value),
             1..=4 => {
@@ -200,20 +294,8 @@ impl<const N: usize> StatePaletteContainer<N> {
             },
         }
     }
-}
 
-impl<const N: usize> StatePaletteContainer<N> {
-    pub fn get(&mut self, i: usize) -> u64 {
-        if i >= N {
-            panic!("out of bounds")
-        }
-        //SAFETY: This is safe because we know i is in bounds.
-        unsafe { self.get_unchecked(i) }
-    }
-
-    /// # Safety
-    /// This method is safe as long as `i` is within bounds.
-    pub unsafe fn get_unchecked(&mut self, i: usize) -> u64 {
+    unsafe fn get_unchecked(&mut self, i: usize) -> u64 {
         match &mut self.palette {
             StatePalette::SingleValue(v) => v.0,
             StatePalette::Linear { palette, data } => palette.value(data.get_unchecked(i) as usize),
@@ -222,17 +304,7 @@ impl<const N: usize> StatePaletteContainer<N> {
         }
     }
 
-    pub fn set(&mut self, i: usize, v: u64) {
-        if i >= N {
-            panic!("out of bounds")
-        }
-        // SAFETY: This is sound because we just checked the bounds
-        unsafe { self.set_unchecked(i, v) }
-    }
-
-    /// # Safety
-    /// This method is safe as long as `i` is within bounds.
-    pub unsafe fn set_unchecked(&mut self, i: usize, v: u64) {
+    unsafe fn set_unchecked(&mut self, i: usize, v: u64) {
         loop {
             match &mut self.palette {
                 StatePalette::SingleValue(val) => match val.index(v) {
@@ -304,21 +376,21 @@ impl<const N: usize> StatePaletteContainer<N> {
         }
     }
 
-    pub fn swap(&mut self, i: usize, v: u64) -> u64 {
-        if i >= N {
-            panic!("out of bounds")
-        }
-        //SAFETY: This is safe because we just checked the bounds.
-        unsafe { self.swap_unchecked(i, v) }
-    }
+}
 
-    /// # Safety
-    /// This method is safe as long as `i` is within bounds
-    pub unsafe fn swap_unchecked(&mut self, i: usize, v: u64) -> u64 {
-        let val = self.get_unchecked(i);
-        self.set_unchecked(i, v);
-        val
-    }
+enum StatePalette<const N: usize> {
+    SingleValue(SingleValuePalette),
+    Linear {
+        palette: LinearPalette,
+        data: PackedBits<N>,
+    },
+    Mapped {
+        palette: MappedPalette,
+        data: PackedBits<N>,
+    },
+    Global {
+        data: PackedBits<N>,
+    },
 }
 
 trait Palette {
@@ -419,7 +491,7 @@ impl Palette for MappedPalette {
 
 #[cfg(test)]
 mod tests {
-    use super::{BiomePaletteContainer, StatePaletteContainer};
+    use super::{BiomePaletteContainer, StatePaletteContainer, PaletteContainer};
 
     #[test]
     fn state() {
