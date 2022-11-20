@@ -14,16 +14,16 @@ pub struct ChunkSection {
     pub biomes: BiomePaletteContainer<64>,   // 4*4*4 = 64
 }
 
-pub trait BlockDataContainer<const N: usize>: DataContainer<N> {
+pub trait BlockDataContainer<const N: usize, V>: DataContainer<N, V> {
     fn new<'a>(data: Cow<'a, [u8]>, version: miners::version::ProtocolVersion) -> Self;
 }
 
-pub trait ChunkDataContainer<const N: usize>: DataContainer<N> {
+pub trait ChunkDataContainer<const N: usize, V>: DataContainer<N, V> {
     fn new<'a>(data: Cow<'a, [u8]>, version: miners::version::ProtocolVersion) -> Self;
 }
 
-pub unsafe trait DataContainer<const N: usize> {
-    fn get(&self, i: usize) -> u64 {
+pub unsafe trait DataContainer<const N: usize, V> {
+    fn get(&self, i: usize) -> V {
         if i >= N {
             panic!("out of bounds")
         }
@@ -33,9 +33,9 @@ pub unsafe trait DataContainer<const N: usize> {
 
     /// # Safety
     /// This method is safe as long as `i` is within bounds.
-    unsafe fn get_unchecked(&self, i: usize) -> u64;
+    unsafe fn get_unchecked(&self, i: usize) -> V;
 
-    fn set(&mut self, i: usize, v: u64) {
+    fn set(&mut self, i: usize, v: V) {
         if i >= N {
             panic!("out of bounds")
         }
@@ -45,9 +45,9 @@ pub unsafe trait DataContainer<const N: usize> {
 
     /// # Safety
     /// This method is safe as long as `i` is within bounds.
-    unsafe fn set_unchecked(&mut self, i: usize, v: u64);
+    unsafe fn set_unchecked(&mut self, i: usize, v: V);
 
-    fn swap(&mut self, i: usize, v: u64) -> u64 {
+    fn swap(&mut self, i: usize, v: V) -> V {
         if i >= N {
             panic!("out of bounds")
         }
@@ -57,14 +57,14 @@ pub unsafe trait DataContainer<const N: usize> {
 
     /// # Safety
     /// This method is safe as long as `i` is within bounds
-    unsafe fn swap_unchecked(&mut self, i: usize, v: u64) -> u64 {
+    unsafe fn swap_unchecked(&mut self, i: usize, v: V) -> V {
         let val = self.get_unchecked(i);
         self.set_unchecked(i, v);
         val
     }
 }
 
-unsafe impl<const N: usize, T: super::palette::PaletteContainer<N>> DataContainer<N> for T {
+unsafe impl<const N: usize, T: super::palette::PaletteContainer<N>> DataContainer<N, u64> for T {
     unsafe fn get_unchecked(&self, i: usize) -> u64 {
         self.get_unchecked(i)
     }
