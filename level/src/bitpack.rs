@@ -37,9 +37,6 @@ impl<const N: usize> AsRef<Vec<u64>> for PackedBits<N> {
 }
 
 impl<const N: usize> PackedBits<N> {
-    //pub fn len(&self) -> usize {
-    //    self.len
-    //}
     /// Constructs a new `PackedBits`, panics if `bits` is equal to zero or if bits is greater than 64.
     #[inline]
     pub fn new(bits: usize) -> Self {
@@ -121,20 +118,20 @@ impl<const N: usize> PackedBits<N> {
         *num |= v.rotate_right(self.bits as u32) >> bo;
     }
 
-    //#[inline]
-    //pub fn swap(&mut self, i: usize, v: u64) -> Option<u64> {
-    //    let val = self.get(i)?;
-    //    //SAFETY: This is fine because the self.get call already checked bounds.
-    //    unsafe { self.set_unchecked(i, v) };
-    //    Some(val)
-    //}
-    //
-    //#[inline]
-    //pub unsafe fn swap_unchecked(&mut self, i: usize, v: u64) -> u64 {
-    //    let val = self.get_unchecked(i);
-    //    self.set_unchecked(i, v);
-    //    val
-    //}
+    #[inline]
+    pub fn swap(&mut self, i: usize, v: u64) -> Option<u64> {
+        let val = self.get(i)?;
+        //SAFETY: This is fine because the self.get call already checked bounds.
+        unsafe { self.set_unchecked(i, v) };
+        Some(val)
+    }
+    
+    #[inline]
+    pub unsafe fn swap_unchecked(&mut self, i: usize, v: u64) -> u64 {
+        let val = self.get_unchecked(i);
+        self.set_unchecked(i, v);
+        val
+    }
 
     pub fn change_bits(&mut self, bits: usize) {
         let mut new = Self::new_unchecked(bits);
