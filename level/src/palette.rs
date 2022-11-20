@@ -1,12 +1,11 @@
 use crate::bitpack::PackedBits;
 use std::collections::BTreeMap;
 
-
 pub unsafe trait PaletteContainer<const N: usize> {
     fn new(value: u64) -> Self;
     fn with_bits(bits: usize, value: u64) -> Self;
 
-    fn get(&mut self, i: usize) -> u64 {
+    fn get(&self, i: usize) -> u64 {
         if i >= N {
             panic!("out of bounds")
         }
@@ -16,8 +15,8 @@ pub unsafe trait PaletteContainer<const N: usize> {
 
     /// # Safety
     /// This method is safe as long as `i` is within bounds.
-    unsafe fn get_unchecked(&mut self, i: usize) -> u64;
-    
+    unsafe fn get_unchecked(&self, i: usize) -> u64;
+
     fn set(&mut self, i: usize, v: u64) {
         if i >= N {
             panic!("out of bounds")
@@ -76,8 +75,8 @@ unsafe impl<const N: usize> PaletteContainer<N> for BiomePaletteContainer<N> {
         unsafe { Self::with_bits_unchecked(bits, value) }
     }
 
-    unsafe fn get_unchecked(&mut self, i: usize) -> u64 {
-        match &mut self.palette {
+    unsafe fn get_unchecked(&self, i: usize) -> u64 {
+        match &self.palette {
             BiomePalette::SingleValue(v) => v.0,
             BiomePalette::Linear { palette, data } => palette.value(data.get_unchecked(i) as usize),
         }
@@ -194,8 +193,8 @@ unsafe impl<const N: usize> PaletteContainer<N> for StatePaletteContainer<N> {
         }
     }
 
-    unsafe fn get_unchecked(&mut self, i: usize) -> u64 {
-        match &mut self.palette {
+    unsafe fn get_unchecked(&self, i: usize) -> u64 {
+        match &self.palette {
             StatePalette::SingleValue(v) => v.0,
             StatePalette::Linear { palette, data } => palette.value(data.get_unchecked(i) as usize),
             StatePalette::Mapped { palette, data } => palette.value(data.get_unchecked(i) as usize),
@@ -274,7 +273,6 @@ unsafe impl<const N: usize> PaletteContainer<N> for StatePaletteContainer<N> {
             }
         }
     }
-
 }
 
 enum StatePalette<const N: usize> {
@@ -390,7 +388,7 @@ impl Palette for MappedPalette {
 
 #[cfg(test)]
 mod tests {
-    use super::{BiomePaletteContainer, StatePaletteContainer, PaletteContainer};
+    use super::{BiomePaletteContainer, PaletteContainer, StatePaletteContainer};
 
     #[test]
     fn state() {

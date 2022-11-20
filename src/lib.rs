@@ -8,4 +8,3 @@ pub use craftrs_auth as auth;
 pub use craftrs_level as level;
 #[cfg(feature = "net")]
 pub use craftrs_net as net;
-

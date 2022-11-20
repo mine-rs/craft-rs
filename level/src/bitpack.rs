@@ -128,7 +128,7 @@ impl<const N: usize> PackedBits<N> {
     //    unsafe { self.set_unchecked(i, v) };
     //    Some(val)
     //}
-//
+    //
     //#[inline]
     //pub unsafe fn swap_unchecked(&mut self, i: usize, v: u64) -> u64 {
     //    let val = self.get_unchecked(i);

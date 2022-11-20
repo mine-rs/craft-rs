@@ -1,13 +1,13 @@
 //TODO: Add documentation and fix naming
 #![deny(clippy::undocumented_unsafe_blocks)]
 use {
-    std::{string::FromUtf8Error, path::Path},
     async_fs as fs,
+    futures_io::{AsyncRead, AsyncWrite},
+    futures_util::{AsyncReadExt, AsyncWriteExt},
     reqwest::{Client, StatusCode},
     serde_derive::{Deserialize, Serialize},
     serde_json::json,
-    futures_io::{AsyncRead, AsyncWrite,},
-    futures_util::{AsyncReadExt, AsyncWriteExt}
+    std::{path::Path, string::FromUtf8Error},
 };
 
 const CACHE_FILE_NAME: &str = "auth.cache";
@@ -295,11 +295,7 @@ impl DeviceCode {
     /// Entry point of the auth flow.
     /// It's up to you how you show the user the user code and the link
     /// Only show the user code and the link when cached is false because they'll be empty if not.
-    pub async fn new(
-        cid: &str,
-        cache_file: Option<&str>,
-        client: &Client,
-    ) -> Result<Self, Error> {
+    pub async fn new(cid: &str, cache_file: Option<&str>, client: &Client) -> Result<Self, Error> {
         let (path, name) = match cache_file {
             Some(file) => (Path::new(file), file),
             None => (Path::new(CACHE_FILE_NAME), CACHE_FILE_NAME),
@@ -349,14 +345,16 @@ impl DeviceCode {
                     .await?;
                 match code_resp.status() {
                     StatusCode::BAD_REQUEST => {
-                        let ms_auth_error: MsAuthError = serde_json::from_slice(&code_resp.bytes().await?)?;
+                        let ms_auth_error: MsAuthError =
+                            serde_json::from_slice(&code_resp.bytes().await?)?;
                         match &ms_auth_error.error as &str {
                             "authorization_pending" => continue,
-                            _ => return Err(ms_auth_error.into())
+                            _ => return Err(ms_auth_error.into()),
                         }
                     }
                     StatusCode::OK => {
-                        let mut ms_auth: MsAuth = serde_json::from_slice(&code_resp.bytes().await?)?;
+                        let mut ms_auth: MsAuth =
+                            serde_json::from_slice(&code_resp.bytes().await?)?;
                         ms_auth.expires_after = ms_auth.expires_in + chrono::Utc::now().timestamp();
                         return Ok(Some(ms_auth));
                     }
@@ -388,7 +386,13 @@ impl DeviceCode {
                 msa
             }
         };
-        let mca = msa.auth_xbl(client).await?.auth_xsts(client).await?.auth_mc(client).await?;
+        let mca = msa
+            .auth_xbl(client)
+            .await?
+            .auth_xsts(client)
+            .await?
+            .auth_mc(client)
+            .await?;
 
         let profile = mca.mc_profile(client).await?;
 
