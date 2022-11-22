@@ -1,16 +1,18 @@
-#[derive(Default, Clone)]
-pub struct PackedBits<const N: usize> {
+pub(crate) mod byteorder;
+
+#[derive(Default, Clone)]  
+pub struct PackedBits<const N: usize, B: byteorder::ByteOrderedU64> {
     pub(crate) bits: usize,
     mask: u64,
     vpe: usize, // values per element in the vector
-    data: Vec<u64>,
+    data: Vec<B>,
 }
 
-pub struct PackedBitsIter<const N: usize> {
-    inner: PackedBits<N>,
+pub struct PackedBitsIter<const N: usize, B: byteorder::ByteOrderedU64> {
+    inner: PackedBits<N, B>,
     index: usize,
 }
-impl<const N: usize> Iterator for PackedBitsIter<N> {
+impl<const N: usize, B: byteorder::ByteOrderedU64> Iterator for PackedBitsIter<N, B> {
     type Item = u64;
     fn next(&mut self) -> Option<Self::Item> {
         let v = self.inner.get(self.index);
@@ -19,9 +21,9 @@ impl<const N: usize> Iterator for PackedBitsIter<N> {
     }
 }
 
-impl<const N: usize> IntoIterator for PackedBits<N> {
+impl<const N: usize, B: byteorder::ByteOrderedU64> IntoIterator for PackedBits<N, B> {
     type Item = u64;
-    type IntoIter = PackedBitsIter<N>;
+    type IntoIter = PackedBitsIter<N, B>;
     fn into_iter(self) -> Self::IntoIter {
         PackedBitsIter {
             index: 0,
@@ -30,13 +32,13 @@ impl<const N: usize> IntoIterator for PackedBits<N> {
     }
 }
 
-impl<const N: usize> AsRef<Vec<u64>> for PackedBits<N> {
-    fn as_ref(&self) -> &Vec<u64> {
-        &self.data
-    }
-}
+//impl<const N: usize, B: byteorder::ByteOrderedU64> AsRef<Vec<u64>> for PackedBits<N, B> {
+//    fn as_ref(&self) -> &Vec<u64> {
+//        &self.data
+//    }
+//}
 
-impl<const N: usize> PackedBits<N> {
+impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
     /// Constructs a new `PackedBits`, panics if `bits` is equal to zero or if bits is greater than 64.
     #[inline]
     pub fn new(bits: usize) -> Self {
@@ -53,7 +55,7 @@ impl<const N: usize> PackedBits<N> {
         Self {
             bits,
             mask: ((((1 as u64) << bits) - 1) as u64).rotate_right(bits as u32),
-            data: vec![0; rlen],
+            data: vec![B::from_ne(0); rlen],
             vpe: 64 / bits,
         }
     }
@@ -63,6 +65,8 @@ impl<const N: usize> PackedBits<N> {
     #[allow(dead_code)] // this will be useful for encoding/decoding
     pub fn with_data(bits: usize, data: &[u64]) -> Self {
         let mut this = Self::new(bits);
+        // SAFETY: This is fine because we know `B` has the same size as `u64` 
+        let data = unsafe { std::mem::transmute(data) };
         this.data.copy_from_slice(data);
         this
     }
@@ -95,10 +99,13 @@ impl<const N: usize> PackedBits<N> {
         unsafe { Some(self.get_unchecked(i)) }
     }
 
+    /// # Safety
+    /// This is safe as long as `i` is within bounds.
     #[inline]
     pub unsafe fn get_unchecked(&self, i: usize) -> u64 {
         let (vi, bits, bo) = self.calculate_index(i);
-        (((self.data.get_unchecked(vi) & bits) << bo) as u64).rotate_left(self.bits as u32)
+        let num = self.data.get_unchecked(vi).to_ne();
+        (((num & bits) << bo) as u64).rotate_left(self.bits as u32)
     }
 
     #[inline]
@@ -113,9 +120,13 @@ impl<const N: usize> PackedBits<N> {
     #[inline]
     pub unsafe fn set_unchecked(&mut self, i: usize, v: u64) {
         let (vi, bits, bo) = self.calculate_index(i);
-        let num = self.data.get_unchecked_mut(vi);
-        *num &= !bits; // set the value to zero
-        *num |= v.rotate_right(self.bits as u32) >> bo;
+        let element = self.data.get_unchecked_mut(vi);
+        // convert the endianness for usage
+        let mut num = element.to_ne();
+        num &= !bits; // set the value to zero
+        num |= v.rotate_right(self.bits as u32) >> bo;
+        // convert the endianness for storage
+        *element = B::from_ne(num);
     }
 
     #[inline]
@@ -145,12 +156,13 @@ impl<const N: usize> PackedBits<N> {
 #[cfg(test)]
 mod tests {
     use super::PackedBits;
+    use super::byteorder;
 
     #[test]
     fn bitpack() {
         let data = vec![0, 1, 2, 3, 4, 5, 6, 7];
         let new_data = vec![7, 6, 5, 4, 3, 2, 1, 0];
-        let mut packedbits = PackedBits::<8>::with_data_unpacked(3, &data);
+        let mut packedbits = PackedBits::<8, byteorder::NativeEndian>::with_data_unpacked(3, &data);
         for bits in 3..=32 {
             for i in 0..8 {
                 assert_eq!(packedbits.get(i).unwrap(), data[i]);

@@ -48,19 +48,19 @@ pub unsafe trait PaletteContainer<const N: usize> {
 
 // TODO: Reduce code duplication (with macros?)
 
-pub struct BiomePaletteContainer<const N: usize> {
-    palette: BiomePalette<N>,
+pub struct BiomePaletteContainer<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> {
+    palette: BiomePalette<N, B>,
 }
 
-enum BiomePalette<const N: usize> {
+enum BiomePalette<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> {
     SingleValue(SingleValuePalette),
     Linear {
         palette: LinearPalette,
-        data: PackedBits<N>,
+        data: PackedBits<N, B>,
     },
 }
 
-unsafe impl<const N: usize> PaletteContainer<N> for BiomePaletteContainer<N> {
+unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> PaletteContainer<N> for BiomePaletteContainer<N, B> {
     fn new(value: u64) -> Self {
         Self {
             palette: BiomePalette::SingleValue(SingleValuePalette(value)),
@@ -123,7 +123,7 @@ unsafe impl<const N: usize> PaletteContainer<N> for BiomePaletteContainer<N> {
     }
 }
 
-impl<const N: usize> BiomePaletteContainer<N> {
+impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> BiomePaletteContainer<N, B> {
     /// # Safety
     /// This method is safe as long as `bits` is not greater than 3.
     pub unsafe fn with_bits_unchecked(bits: usize, value: u64) -> Self {
@@ -145,11 +145,11 @@ impl<const N: usize> BiomePaletteContainer<N> {
     }
 }
 
-pub struct StatePaletteContainer<const N: usize> {
-    palette: StatePalette<N>,
+pub struct StatePaletteContainer<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> {
+    palette: StatePalette<N, B>,
 }
 
-unsafe impl<const N: usize> PaletteContainer<N> for StatePaletteContainer<N> {
+unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> PaletteContainer<N> for StatePaletteContainer<N, B> {
     fn new(value: u64) -> Self {
         Self {
             palette: StatePalette::SingleValue(SingleValuePalette(value)),
@@ -242,7 +242,7 @@ unsafe impl<const N: usize> PaletteContainer<N> for StatePaletteContainer<N> {
                 StatePalette::Mapped { palette, data } => match palette.index(v) {
                     IndexOrBits::Index(v) => return data.set_unchecked(i, v),
                     IndexOrBits::Bits(bits) => {
-                        let palette: StatePalette<N> = if bits == 9 {
+                        let palette: StatePalette<N, B> = if bits == 9 {
                             let mut new_data = PackedBits::new(15);
                             for i in 0..N {
                                 //SAFETY: This is fine because the for loop makes sure `i` stays in bounds
@@ -275,18 +275,18 @@ unsafe impl<const N: usize> PaletteContainer<N> for StatePaletteContainer<N> {
     }
 }
 
-enum StatePalette<const N: usize> {
+enum StatePalette<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> {
     SingleValue(SingleValuePalette),
     Linear {
         palette: LinearPalette,
-        data: PackedBits<N>,
+        data: PackedBits<N, B>,
     },
     Mapped {
         palette: MappedPalette,
-        data: PackedBits<N>,
+        data: PackedBits<N, B>,
     },
     Global {
-        data: PackedBits<N>,
+        data: PackedBits<N, B>,
     },
 }
 
@@ -389,6 +389,7 @@ impl Palette for MappedPalette {
 #[cfg(test)]
 mod tests {
     use super::{BiomePaletteContainer, PaletteContainer, StatePaletteContainer};
+    use crate::bitpack::byteorder;
 
     #[test]
     fn state() {
@@ -397,7 +398,7 @@ mod tests {
             data.push(i)
         }
         data.reverse();
-        let mut container = StatePaletteContainer::<512>::new(0);
+        let mut container = StatePaletteContainer::<512, byteorder::NativeEndian>::new(0);
         for i in 0..512 {
             container.set(i, data[i]);
             assert_eq!(container.get(i), data[i]);
@@ -410,7 +411,7 @@ mod tests {
     #[test]
     fn biome() {
         let data = vec![7, 6, 5, 4, 3, 2, 1, 0];
-        let mut container = BiomePaletteContainer::<8>::new(0);
+        let mut container = BiomePaletteContainer::<8, byteorder::NativeEndian>::new(0);
         for i in 0..8 {
             container.set(i, data[i]);
             assert_eq!(container.get(i), data[i]);

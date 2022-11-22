@@ -3,18 +3,19 @@ use std::borrow::Cow;
 use crate::palette::{BiomePaletteContainer, StatePaletteContainer};
 
 /// A chunk column, not including heightmaps
-pub struct ChunkColumn<const N: usize> {
+pub struct ChunkColumn<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> {
     //pub motion_blocking: PackedBits<256>, // len = 256 bits = 9
-    pub sections: [Option<ChunkSection>; N],
+    pub sections: [Option<ChunkSection<B>>; N],
 }
 
-pub struct ChunkSection {
+/// A 16 * 16 * 16 section of a chunk.
+pub struct ChunkSection<B: super::bitpack::byteorder::ByteOrderedU64> {
     pub block_count: u16,
-    pub states: StatePaletteContainer<4096>, // 16*16*16 = 4096
-    pub biomes: BiomePaletteContainer<64>,   // 4*4*4 = 64
+    pub states: StatePaletteContainer<4096, B>, // 16*16*16 = 4096
+    pub biomes: BiomePaletteContainer<64, B>,   // 4*4*4 = 64
 }
 
-pub trait BlockDataContainer<const N: usize, V>: DataContainer<N, V> {
+pub trait BlockDataContainer<B: super::bitpack::byteorder::ByteOrderedU64, V>: DataContainer<4096, V> {
     fn new<'a>(data: Cow<'a, [u8]>, version: miners::version::ProtocolVersion) -> Self;
 }
 
