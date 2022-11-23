@@ -5,7 +5,7 @@ use miners::encoding::{Decode, Encode};
 /// # Safety
 /// This trait is safe to implement as long as the struct has the same data layout as `u64`
 pub unsafe trait ByteOrderedU64:
-    Copy + Clone + Default + Encode + for<'a> Decode<'a>
+    Copy + Clone + Default /*+ Encode + for<'a> Decode<'a>*/
 {
     // used for using the value internally
     fn to_ne(self) -> u64;
@@ -16,21 +16,21 @@ pub unsafe trait ByteOrderedU64:
 #[derive(Clone, Copy, Default)]
 pub struct BigEndian(u64);
 
-impl Encode for BigEndian {
-    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
-        // The data is already in big endian regardless of the endianness of the system so this just preserves the byte order.
-        writer.write_all(&self.0.to_ne_bytes())?;
-        Ok(())
-    }
-}
-
-impl<'dec> Decode<'dec> for BigEndian {
-    fn decode(cursor: &mut std::io::Cursor<&'dec [u8]>) -> miners::encoding::decode::Result<Self> {
-        let mut bytes = [0u8; 8];
-        cursor.read_exact(&mut bytes)?;
-        Ok(Self(u64::from_ne_bytes(bytes)))
-    }
-}
+//impl Encode for BigEndian {
+//    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
+//        // The data is already in big endian regardless of the endianness of the system so this just preserves the byte order.
+//        writer.write_all(&self.0.to_ne_bytes())?;
+//        Ok(())
+//    }
+//}
+//
+//impl<'dec> Decode<'dec> for BigEndian {
+//    fn decode(cursor: &mut std::io::Cursor<&'dec [u8]>) -> miners::encoding::decode::Result<Self> {
+//        let mut bytes = [0u8; 8];
+//        cursor.read_exact(&mut bytes)?;
+//        Ok(Self(u64::from_ne_bytes(bytes)))
+//    }
+//}
 
 // SAFETY: This is fine because the struct is `repr(transparent)`
 unsafe impl ByteOrderedU64 for BigEndian {
