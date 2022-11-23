@@ -1,5 +1,3 @@
-use std::io::Read;
-
 use miners::encoding::{Decode, Encode};
 
 /// # Safety
