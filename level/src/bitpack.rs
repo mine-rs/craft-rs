@@ -233,14 +233,15 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
 }
 #[cfg(test)]
 mod tests {
+    use super::PackedBitsBE;
+    use super::PackedBitsNE;
     use super::byteorder;
     use super::PackedBits;
 
-    #[test]
-    fn bitpack() {
+    fn bitpack<B: byteorder::ByteOrderedU64>() -> PackedBits<8, B> {
         let data = vec![0, 1, 2, 3, 4, 5, 6, 7];
         let new_data = vec![7, 6, 5, 4, 3, 2, 1, 0];
-        let mut packedbits = PackedBits::<8, byteorder::NativeEndian>::with_data_unpacked(3, &data);
+        let mut packedbits = PackedBits::<8, B>::with_data_unpacked(3, &data);
         for bits in 3..=32 {
             for i in 0..8 {
                 assert_eq!(packedbits.get(i).unwrap(), data[i]);
@@ -255,5 +256,16 @@ mod tests {
 
             packedbits.change_bits(bits + 1);
         }
+        packedbits
+    }
+
+    #[test]
+    fn bitpack_ne() {
+        let _packedbits: PackedBitsNE<8> = bitpack::<byteorder::NativeEndian>().into();        
+    }
+
+    #[test]
+    fn bitpack_be() {
+        let _packedbits: PackedBitsBE<8> = bitpack::<byteorder::BigEndian>().into();
     }
 }
