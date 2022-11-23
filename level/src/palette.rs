@@ -60,7 +60,9 @@ enum BiomePalette<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> 
     },
 }
 
-unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> PaletteContainer<N> for BiomePaletteContainer<N, B> {
+unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> PaletteContainer<N>
+    for BiomePaletteContainer<N, B>
+{
     fn new(value: u64) -> Self {
         Self {
             palette: BiomePalette::SingleValue(SingleValuePalette(value)),
@@ -149,7 +151,9 @@ pub struct StatePaletteContainer<const N: usize, B: super::bitpack::byteorder::B
     palette: StatePalette<N, B>,
 }
 
-unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> PaletteContainer<N> for StatePaletteContainer<N, B> {
+unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> PaletteContainer<N>
+    for StatePaletteContainer<N, B>
+{
     fn new(value: u64) -> Self {
         Self {
             palette: StatePalette::SingleValue(SingleValuePalette(value)),

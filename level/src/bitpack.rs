@@ -1,6 +1,68 @@
+use std::ops::Deref;
+
+use miners::encoding::Encode;
+
 pub(crate) mod byteorder;
 
-#[derive(Default, Clone)]  
+#[repr(transparent)]
+pub struct PackedBitsNE<const N: usize> {
+    inner: PackedBits<N, byteorder::NativeEndian>,
+}
+
+impl<const N: usize> Encode for PackedBitsNE<N> {
+    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
+        for i in &self.data {
+            i.encode(writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl<const N: usize> AsRef<[u64]> for PackedBitsNE<N> {
+    fn as_ref(&self) -> &[u64] {
+        // SAFETY: This is fine because the `NativeEndian` struct has the same layout as `u64`
+        unsafe { std::mem::transmute(self.data.as_slice()) }
+    }
+}
+
+impl<const N: usize> Deref for PackedBitsNE<N> {
+    type Target = PackedBits<N, byteorder::NativeEndian>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+#[repr(transparent)]
+pub struct PackedBitsBE<const N: usize> {
+    inner: PackedBits<N, byteorder::BigEndian>,
+}
+
+impl<const N: usize> Encode for PackedBitsBE<N> {
+    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
+        writer.write_all(self.as_ref()).map_err(From::from)
+    }
+}
+
+impl<const N: usize> AsRef<[u8]> for PackedBitsBE<N> {
+    fn as_ref(&self) -> &[u8] {
+        // SAFETY: This is fine because the `BigEndian` struct has the same layout as a `u64`
+        // and there are 8 bytes in a `u64` so the length is multiplied by 8.
+        unsafe {
+            std::slice::from_raw_parts(std::mem::transmute(self.data.as_ptr()), self.data.len() * 8)
+        }
+    }
+}
+
+impl<const N: usize> Deref for PackedBitsBE<N> {
+    type Target = PackedBits<N, byteorder::BigEndian>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+#[derive(Default, Clone)]
 pub struct PackedBits<const N: usize, B: byteorder::ByteOrderedU64> {
     pub(crate) bits: usize,
     mask: u64,
@@ -65,7 +127,7 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
     #[allow(dead_code)] // this will be useful for encoding/decoding
     pub fn with_data(bits: usize, data: &[u64]) -> Self {
         let mut this = Self::new(bits);
-        // SAFETY: This is fine because we know `B` has the same size as `u64` 
+        // SAFETY: This is fine because we know `B` has the same size as `u64`
         let data = unsafe { std::mem::transmute(data) };
         this.data.copy_from_slice(data);
         this
@@ -136,7 +198,7 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
         unsafe { self.set_unchecked(i, v) };
         Some(val)
     }
-    
+
     #[inline]
     pub unsafe fn swap_unchecked(&mut self, i: usize, v: u64) -> u64 {
         let val = self.get_unchecked(i);
@@ -155,8 +217,8 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
 }
 #[cfg(test)]
 mod tests {
-    use super::PackedBits;
     use super::byteorder;
+    use super::PackedBits;
 
     #[test]
     fn bitpack() {

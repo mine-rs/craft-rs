@@ -15,7 +15,9 @@ pub struct ChunkSection<B: super::bitpack::byteorder::ByteOrderedU64> {
     pub biomes: BiomePaletteContainer<64, B>,   // 4*4*4 = 64
 }
 
-pub trait BlockDataContainer<B: super::bitpack::byteorder::ByteOrderedU64, V>: DataContainer<4096, V> {
+pub trait BlockDataContainer<B: super::bitpack::byteorder::ByteOrderedU64, V>:
+    DataContainer<4096, V>
+{
     fn new<'a>(data: Cow<'a, [u8]>, version: miners::version::ProtocolVersion) -> Self;
 }
 
