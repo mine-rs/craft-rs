@@ -9,6 +9,14 @@ pub struct PackedBitsNE<const N: usize> {
     inner: PackedBits<N, byteorder::NativeEndian>,
 }
 
+impl<const N: usize> From<PackedBits<N, byteorder::NativeEndian>> for PackedBitsNE<N> {
+    fn from(inner: PackedBits<N, byteorder::NativeEndian>) -> Self {
+        Self {
+            inner
+        }
+    }
+}
+
 impl<const N: usize> Encode for PackedBitsNE<N> {
     fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
         for i in &self.data {
@@ -36,6 +44,14 @@ impl<const N: usize> Deref for PackedBitsNE<N> {
 #[repr(transparent)]
 pub struct PackedBitsBE<const N: usize> {
     inner: PackedBits<N, byteorder::BigEndian>,
+}
+
+impl<const N: usize> From<PackedBits<N, byteorder::BigEndian>> for PackedBitsBE<N> {
+    fn from(inner: PackedBits<N, byteorder::BigEndian>) -> Self {
+        Self {
+            inner
+        }
+    }
 }
 
 impl<const N: usize> Encode for PackedBitsBE<N> {
