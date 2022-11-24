@@ -1,23 +1,10 @@
-use std::ops::Deref;
-
 use miners::encoding::Encode;
+
+use self::byteorder::BigEndian;
 
 pub(crate) mod byteorder;
 
-#[repr(transparent)]
-pub struct PackedBitsNE<const N: usize> {
-    inner: PackedBits<N, byteorder::NativeEndian>,
-}
-
-impl<const N: usize> From<PackedBits<N, byteorder::NativeEndian>> for PackedBitsNE<N> {
-    fn from(inner: PackedBits<N, byteorder::NativeEndian>) -> Self {
-        Self {
-            inner
-        }
-    }
-}
-
-impl<const N: usize> Encode for PackedBitsNE<N> {
+impl<const N: usize> Encode for PackedBits<N, byteorder::NativeEndian> {
     fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
         for i in &self.data {
             i.encode(writer)?;
@@ -26,55 +13,26 @@ impl<const N: usize> Encode for PackedBitsNE<N> {
     }
 }
 
-impl<const N: usize> AsRef<[u64]> for PackedBitsNE<N> {
+impl<const N: usize> AsRef<[u64]> for PackedBits<N, byteorder::NativeEndian> {
     fn as_ref(&self) -> &[u64] {
         // SAFETY: This is fine because the `NativeEndian` struct has the same layout as `u64`
         unsafe { std::mem::transmute(self.data.as_slice()) }
     }
 }
 
-impl<const N: usize> Deref for PackedBitsNE<N> {
-    type Target = PackedBits<N, byteorder::NativeEndian>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-#[repr(transparent)]
-pub struct PackedBitsBE<const N: usize> {
-    inner: PackedBits<N, byteorder::BigEndian>,
-}
-
-impl<const N: usize> From<PackedBits<N, byteorder::BigEndian>> for PackedBitsBE<N> {
-    fn from(inner: PackedBits<N, byteorder::BigEndian>) -> Self {
-        Self {
-            inner
-        }
-    }
-}
-
-impl<const N: usize> Encode for PackedBitsBE<N> {
+impl<const N: usize> Encode for PackedBits<N, BigEndian> {
     fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
         writer.write_all(self.as_ref()).map_err(From::from)
     }
 }
 
-impl<const N: usize> AsRef<[u8]> for PackedBitsBE<N> {
+impl<const N: usize> AsRef<[u8]> for PackedBits<N, BigEndian> {
     fn as_ref(&self) -> &[u8] {
         // SAFETY: This is fine because the `BigEndian` struct has the same layout as a `u64`
         // and there are 8 bytes in a `u64` so the length is multiplied by 8.
         unsafe {
             std::slice::from_raw_parts(std::mem::transmute(self.data.as_ptr()), self.data.len() * 8)
         }
-    }
-}
-
-impl<const N: usize> Deref for PackedBitsBE<N> {
-    type Target = PackedBits<N, byteorder::BigEndian>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
     }
 }
 
@@ -233,8 +191,6 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
 }
 #[cfg(test)]
 mod tests {
-    use super::PackedBitsBE;
-    use super::PackedBitsNE;
     use super::byteorder;
     use super::PackedBits;
 
@@ -261,11 +217,11 @@ mod tests {
 
     #[test]
     fn bitpack_ne() {
-        let _packedbits: PackedBitsNE<8> = bitpack::<byteorder::NativeEndian>().into();        
+        let _packedbits = bitpack::<byteorder::NativeEndian>();        
     }
 
     #[test]
     fn bitpack_be() {
-        let _packedbits: PackedBitsBE<8> = bitpack::<byteorder::BigEndian>().into();
+        let _packedbits = bitpack::<byteorder::BigEndian>();
     }
 }
