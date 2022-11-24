@@ -3,7 +3,7 @@ use miners::encoding::{Decode, Encode};
 /// # Safety
 /// This trait is safe to implement as long as the struct has the same data layout as `u64`
 pub unsafe trait ByteOrderedU64:
-    Copy + Clone + Default /*+ Encode + for<'a> Decode<'a>*/
+    Copy + Clone + Default/*+ Encode + for<'a> Decode<'a>*/
 {
     // used for using the value internally
     fn to_ne(self) -> u64;
@@ -13,6 +13,10 @@ pub unsafe trait ByteOrderedU64:
 #[repr(transparent)]
 #[derive(Clone, Copy, Default)]
 pub struct BigEndian(u64);
+
+impl BigEndian {
+    pub const ZERO: BigEndian = Self(0);
+}
 
 //impl Encode for BigEndian {
 //    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {

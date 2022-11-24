@@ -1,8 +1,16 @@
 use miners::encoding::Encode;
 
-use self::byteorder::BigEndian;
+use self::byteorder::{BigEndian, NativeEndian};
 
 pub(crate) mod byteorder;
+
+#[derive(Default, Clone)]
+pub struct PackedBits<const N: usize, B: byteorder::ByteOrderedU64> {
+    pub(crate) bits: usize,
+    mask: u64,
+    vpe: usize, // values per element in the vector
+    data: Vec<B>,
+}
 
 impl<const N: usize> Encode for PackedBits<N, byteorder::NativeEndian> {
     fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
@@ -36,12 +44,59 @@ impl<const N: usize> AsRef<[u8]> for PackedBits<N, BigEndian> {
     }
 }
 
-#[derive(Default, Clone)]
-pub struct PackedBits<const N: usize, B: byteorder::ByteOrderedU64> {
-    pub(crate) bits: usize,
-    mask: u64,
-    vpe: usize, // values per element in the vector
-    data: Vec<B>,
+impl<const N: usize> PackedBits<N, BigEndian> {
+    pub fn from_reader_unchecked(rdr: &mut impl std::io::Read, bits: usize) -> std::io::Result<Self> {
+        let vpe = 64 / bits; // values per element
+        let len = N / vpe;
+        
+        let mut data = Vec::<BigEndian>::with_capacity(len);
+        data.resize(len, BigEndian::ZERO);
+        
+        // SAFETY: This is fine because a u64 is 8 bytes
+        let slice = unsafe {
+            std::slice::from_raw_parts_mut(std::mem::transmute(data.as_mut_ptr()), len*8)
+        };
+        rdr.read_exact(slice)?;
+
+        Ok(Self {
+            bits,
+            data,
+            vpe,
+            mask: Self::calculate_mask(bits)
+        })
+    }
+}
+
+impl<const N: usize> PackedBits<N, NativeEndian> {
+    pub fn from_reader_unchecked(rdr: &mut impl std::io::Read, bits: usize) -> std::io::Result<Self> {
+        let vpe = 64 / bits; // values per element
+        let len = N / vpe;
+        
+        let mut data = Vec::<u64>::with_capacity(len);
+        data.resize(len, 0);
+        
+        // SAFETY: This is fine because a u64 is 8 bytes
+        let slice = unsafe {
+            std::slice::from_raw_parts_mut(std::mem::transmute(data.as_mut_ptr()), len*8)
+        };
+        rdr.read_exact(slice)?;
+
+        for i in &mut data {
+            // this swaps the bytes on little endian, converting it to little endian despite the name of the function
+            // on big endian this does nothing, as it should
+            *i = i.to_be()
+        }
+
+        // SAFETY: This is fine because `NativeEndian` is just a u64.
+        let data = unsafe { std::mem::transmute(data) };
+
+        Ok(Self {
+            bits,
+            data,
+            vpe,
+            mask: Self::calculate_mask(bits)
+        })
+    }
 }
 
 pub struct PackedBitsIter<const N: usize, B: byteorder::ByteOrderedU64> {
@@ -90,7 +145,7 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
         let rlen = (N + vpe - 1) / vpe; // The real length of the vec
         Self {
             bits,
-            mask: ((((1 as u64) << bits) - 1) as u64).rotate_right(bits as u32),
+            mask: Self::calculate_mask(bits),
             data: vec![B::from_ne(0); rlen],
             vpe: 64 / bits,
         }
@@ -187,6 +242,10 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
             unsafe { new.set_unchecked(i, self.get_unchecked(i)) }
         }
         *self = new;
+    }
+
+    fn calculate_mask(bits: usize) -> u64 {
+        ((((1 as u64) << bits) - 1) as u64).rotate_right(bits as u32)
     }
 }
 #[cfg(test)]
