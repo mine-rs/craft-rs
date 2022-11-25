@@ -65,6 +65,13 @@ impl<const N: usize> PackedBits<N, BigEndian> {
             mask: Self::calculate_mask(bits)
         })
     }
+
+    pub fn from_reader(rdr: &mut impl std::io::Read, bits: usize) -> std::io::Result<Self> {
+        if bits == 0 || bits > 32  {
+            panic!("invalid amount of bits")
+        }
+        Self::from_reader_unchecked(rdr, bits)
+    }
 }
 
 impl<const N: usize> PackedBits<N, NativeEndian> {
@@ -96,6 +103,13 @@ impl<const N: usize> PackedBits<N, NativeEndian> {
             vpe,
             mask: Self::calculate_mask(bits)
         })
+    }
+
+    pub fn from_reader(rdr: &mut impl std::io::Read, bits: usize) -> std::io::Result<Self> {
+        if bits == 0 || bits > 32  {
+            panic!("invalid amount of bits")
+        }
+        Self::from_reader_unchecked(rdr, bits)
     }
 }
 
@@ -130,7 +144,7 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> IntoIterator for PackedBits<N
 //}
 
 impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
-    /// Constructs a new `PackedBits`, panics if `bits` is equal to zero or if bits is greater than 64.
+    /// Constructs a new `PackedBits`, panics if `bits` is equal to zero or if bits is greater than 32.
     #[inline]
     pub fn new(bits: usize) -> Self {
         if bits == 0 || bits > 32 {
