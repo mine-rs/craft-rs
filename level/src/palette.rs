@@ -2,10 +2,10 @@ use crate::bitpack::PackedBits;
 use std::collections::BTreeMap;
 
 pub unsafe trait PaletteContainer<const N: usize> {
-    fn new(value: u64) -> Self;
-    fn with_bits(bits: usize, value: u64) -> Self;
+    fn new(value: u16) -> Self;
+    fn with_bits(bits: usize, value: u16) -> Self;
 
-    fn get(&self, i: usize) -> u64 {
+    fn get(&self, i: usize) -> u16 {
         if i >= N {
             panic!("out of bounds")
         }
@@ -15,9 +15,9 @@ pub unsafe trait PaletteContainer<const N: usize> {
 
     /// # Safety
     /// This method is safe as long as `i` is within bounds.
-    unsafe fn get_unchecked(&self, i: usize) -> u64;
+    unsafe fn get_unchecked(&self, i: usize) -> u16;
 
-    fn set(&mut self, i: usize, v: u64) {
+    fn set(&mut self, i: usize, v: u16) {
         if i >= N {
             panic!("out of bounds")
         }
@@ -27,9 +27,9 @@ pub unsafe trait PaletteContainer<const N: usize> {
 
     /// # Safety
     /// This method is safe as long as `i` is within bounds.
-    unsafe fn set_unchecked(&mut self, i: usize, v: u64);
+    unsafe fn set_unchecked(&mut self, i: usize, v: u16);
 
-    fn swap(&mut self, i: usize, v: u64) -> u64 {
+    fn swap(&mut self, i: usize, v: u16) -> u16 {
         if i >= N {
             panic!("out of bounds")
         }
@@ -39,7 +39,7 @@ pub unsafe trait PaletteContainer<const N: usize> {
 
     /// # Safety
     /// This method is safe as long as `i` is within bounds
-    unsafe fn swap_unchecked(&mut self, i: usize, v: u64) -> u64 {
+    unsafe fn swap_unchecked(&mut self, i: usize, v: u16) -> u16 {
         let val = self.get_unchecked(i);
         self.set_unchecked(i, v);
         val
@@ -63,13 +63,13 @@ enum BiomePalette<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> 
 unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> PaletteContainer<N>
     for BiomePaletteContainer<N, B>
 {
-    fn new(value: u64) -> Self {
+    fn new(value: u16) -> Self {
         Self {
             palette: BiomePalette::SingleValue(SingleValuePalette(value)),
         }
     }
 
-    fn with_bits(bits: usize, value: u64) -> Self {
+    fn with_bits(bits: usize, value: u16) -> Self {
         if bits > 3 {
             panic!("bits cannot exceed 3")
         }
@@ -77,14 +77,14 @@ unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> Palett
         unsafe { Self::with_bits_unchecked(bits, value) }
     }
 
-    unsafe fn get_unchecked(&self, i: usize) -> u64 {
+    unsafe fn get_unchecked(&self, i: usize) -> u16 {
         match &self.palette {
             BiomePalette::SingleValue(v) => v.0,
             BiomePalette::Linear { palette, data } => palette.value(data.get_unchecked(i) as usize),
         }
     }
 
-    unsafe fn set_unchecked(&mut self, i: usize, v: u64) {
+    unsafe fn set_unchecked(&mut self, i: usize, v: u16) {
         loop {
             match &mut self.palette {
                 BiomePalette::SingleValue(val) => match val.index(v) {
@@ -101,7 +101,7 @@ unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> Palett
                     }
                 },
                 BiomePalette::Linear { palette, data } => match palette.index(v) {
-                    IndexOrBits::Index(v) => return data.set_unchecked(i, v),
+                    IndexOrBits::Index(v) => return data.set_unchecked(i, v as u32),
                     IndexOrBits::Bits(bits) => {
                         if bits > 3 {
                             panic!("bits cannot exceed 3")
@@ -128,7 +128,7 @@ unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> Palett
 impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> BiomePaletteContainer<N, B> {
     /// # Safety
     /// This method is safe as long as `bits` is not greater than 3.
-    pub unsafe fn with_bits_unchecked(bits: usize, value: u64) -> Self {
+    pub unsafe fn with_bits_unchecked(bits: usize, value: u16) -> Self {
         match bits {
             0 => Self::new(value),
             // Here we assume bits is 1, 2, or 3
@@ -154,13 +154,13 @@ pub struct StatePaletteContainer<const N: usize, B: super::bitpack::byteorder::B
 unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> PaletteContainer<N>
     for StatePaletteContainer<N, B>
 {
-    fn new(value: u64) -> Self {
+    fn new(value: u16) -> Self {
         Self {
             palette: StatePalette::SingleValue(SingleValuePalette(value)),
         }
     }
 
-    fn with_bits(bits: usize, value: u64) -> Self {
+    fn with_bits(bits: usize, value: u16) -> Self {
         match bits {
             0 => Self::new(value),
             1..=4 => {
@@ -197,16 +197,16 @@ unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> Palett
         }
     }
 
-    unsafe fn get_unchecked(&self, i: usize) -> u64 {
+    unsafe fn get_unchecked(&self, i: usize) -> u16 {
         match &self.palette {
             StatePalette::SingleValue(v) => v.0,
             StatePalette::Linear { palette, data } => palette.value(data.get_unchecked(i) as usize),
             StatePalette::Mapped { palette, data } => palette.value(data.get_unchecked(i) as usize),
-            StatePalette::Global { data } => u64::from(data.get_unchecked(i)),
+            StatePalette::Global { data } => data.get_unchecked(i) as u16,
         }
     }
 
-    unsafe fn set_unchecked(&mut self, i: usize, v: u64) {
+    unsafe fn set_unchecked(&mut self, i: usize, v: u16) {
         loop {
             match &mut self.palette {
                 StatePalette::SingleValue(val) => match val.index(v) {
@@ -223,7 +223,7 @@ unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> Palett
                     }
                 },
                 StatePalette::Linear { palette, data } => match palette.index(v) {
-                    IndexOrBits::Index(v) => return data.set(i, v),
+                    IndexOrBits::Index(v) => return data.set(i, v as u32),
                     IndexOrBits::Bits(bits) => {
                         debug_assert_eq!(bits, 5);
                         // We know bits will always be 5
@@ -244,13 +244,13 @@ unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> Palett
                     }
                 },
                 StatePalette::Mapped { palette, data } => match palette.index(v) {
-                    IndexOrBits::Index(v) => return data.set_unchecked(i, v),
+                    IndexOrBits::Index(v) => return data.set_unchecked(i, v as u32),
                     IndexOrBits::Bits(bits) => {
                         let palette: StatePalette<N, B> = if bits == 9 {
                             let mut new_data = PackedBits::new(15);
                             for i in 0..N {
                                 //SAFETY: This is fine because the for loop makes sure `i` stays in bounds
-                                new_data.set_unchecked(i, self.get_unchecked(i));
+                                new_data.set_unchecked(i, self.get_unchecked(i) as u32);
                             }
 
                             StatePalette::Global { data: new_data }
@@ -295,8 +295,8 @@ enum StatePalette<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> 
 }
 
 trait Palette {
-    fn index(&mut self, value: u64) -> IndexOrBits;
-    fn value(&self, index: usize) -> u64;
+    fn index(&mut self, value: u16) -> IndexOrBits;
+    fn value(&self, index: usize) -> u16;
 }
 
 // TODO: Rename?
@@ -306,10 +306,10 @@ enum IndexOrBits {
 }
 
 #[derive(Copy, Clone)]
-struct SingleValuePalette(u64);
+struct SingleValuePalette(u16);
 
 impl Palette for SingleValuePalette {
-    fn index(&mut self, state: u64) -> IndexOrBits {
+    fn index(&mut self, state: u16) -> IndexOrBits {
         if self.0 == state {
             IndexOrBits::Index(0)
         } else {
@@ -317,7 +317,7 @@ impl Palette for SingleValuePalette {
         }
     }
 
-    fn value(&self, index: usize) -> u64 {
+    fn value(&self, index: usize) -> u16 {
         if index == 0 {
             self.0
         } else {
@@ -327,12 +327,12 @@ impl Palette for SingleValuePalette {
 }
 
 struct LinearPalette {
-    pub(crate) values: Vec<u64>,
+    pub(crate) values: Vec<u16>,
     pub(crate) bits: usize,
 }
 
 impl Palette for LinearPalette {
-    fn index(&mut self, state: u64) -> IndexOrBits {
+    fn index(&mut self, state: u16) -> IndexOrBits {
         for i in 0..self.values.len() {
             // SAFETY: This is fine because i can only be in bounds due to the for loop.
             unsafe {
@@ -353,19 +353,19 @@ impl Palette for LinearPalette {
     }
 
     #[inline]
-    fn value(&self, index: usize) -> u64 {
+    fn value(&self, index: usize) -> u16 {
         self.values[index]
     }
 }
 
 /// This makes the `index` method faster at the cost of memory usage.
 struct MappedPalette {
-    pub(crate) indices: BTreeMap<u64, usize>,
+    pub(crate) indices: BTreeMap<u16, usize>,
     pub(crate) inner: LinearPalette,
 }
 
 impl Palette for MappedPalette {
-    fn index(&mut self, state: u64) -> IndexOrBits {
+    fn index(&mut self, state: u16) -> IndexOrBits {
         match self.indices.get(&state) {
             Some(v) => IndexOrBits::Index(*v as u64),
             None => {
@@ -385,7 +385,7 @@ impl Palette for MappedPalette {
         }
     }
 
-    fn value(&self, index: usize) -> u64 {
+    fn value(&self, index: usize) -> u16 {
         self.inner.value(index)
     }
 }

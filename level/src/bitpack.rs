@@ -118,7 +118,7 @@ pub struct PackedBitsIter<const N: usize, B: byteorder::ByteOrderedU64> {
     index: usize,
 }
 impl<const N: usize, B: byteorder::ByteOrderedU64> Iterator for PackedBitsIter<N, B> {
-    type Item = u64;
+    type Item = u32;
     fn next(&mut self) -> Option<Self::Item> {
         let v = self.inner.get(self.index);
         self.index += 1;
@@ -127,7 +127,7 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> Iterator for PackedBitsIter<N
 }
 
 impl<const N: usize, B: byteorder::ByteOrderedU64> IntoIterator for PackedBits<N, B> {
-    type Item = u64;
+    type Item = u32;
     type IntoIter = PackedBitsIter<N, B>;
     fn into_iter(self) -> Self::IntoIter {
         PackedBitsIter {
@@ -165,9 +165,9 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
         }
     }
 
-    /// Constructs a new `PackedBits` with data, the data supplied has to already be packed.
+    /// Constructs a new `PackedBits` with data, the data supplied has to already be packed **and be in the right endianness**.
     #[inline]
-    #[allow(dead_code)] // this will be useful for encoding/decoding
+    #[allow(dead_code)]
     pub fn with_data(bits: usize, data: &[u64]) -> Self {
         let mut this = Self::new(bits);
         // SAFETY: This is fine because we know `B` has the same size as `u64`
@@ -176,10 +176,10 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
         this
     }
 
-    /// Constructs a new `PackedBits` with data, the data supplied has to not have been packed yet.
+    /// Constructs a new `PackedBits` with data, the data supplied has to not have been packed yet **and be in native endianness**.
     #[inline]
-    #[allow(dead_code)] // this will be useful for encoding/decoding
-    pub fn with_data_unpacked(bits: usize, data: &[u64]) -> Self {
+    #[allow(dead_code)]
+    pub fn with_data_unpacked(bits: usize, data: &[u32]) -> Self {
         let mut this = Self::new(bits);
         for i in 0..data.len() {
             this.set(i, data[i]);
@@ -196,7 +196,7 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
     }
 
     #[inline]
-    pub fn get(&self, i: usize) -> Option<u64> {
+    pub fn get(&self, i: usize) -> Option<u32> {
         if i >= N {
             return None;
         }
@@ -207,14 +207,14 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
     /// # Safety
     /// This is safe as long as `i` is within bounds.
     #[inline]
-    pub unsafe fn get_unchecked(&self, i: usize) -> u64 {
+    pub unsafe fn get_unchecked(&self, i: usize) -> u32 {
         let (vi, bits, bo) = self.calculate_index(i);
         let num = self.data.get_unchecked(vi).to_ne();
-        (((num & bits) << bo) as u64).rotate_left(self.bits as u32)
+        (((num & bits) << bo) as u64).rotate_left(self.bits as u32) as u32
     }
 
     #[inline]
-    pub fn set(&mut self, i: usize, v: u64) {
+    pub fn set(&mut self, i: usize, v: u32) {
         if i >= N {
             panic!("out of bounds")
         }
@@ -223,19 +223,19 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
     }
 
     #[inline]
-    pub unsafe fn set_unchecked(&mut self, i: usize, v: u64) {
+    pub unsafe fn set_unchecked(&mut self, i: usize, v: u32) {
         let (vi, bits, bo) = self.calculate_index(i);
         let element = self.data.get_unchecked_mut(vi);
         // convert the endianness for usage
         let mut num = element.to_ne();
         num &= !bits; // set the value to zero
-        num |= v.rotate_right(self.bits as u32) >> bo;
+        num |= (v as u64).rotate_right(self.bits as u32) >> bo;
         // convert the endianness for storage
         *element = B::from_ne(num);
     }
 
     #[inline]
-    pub fn swap(&mut self, i: usize, v: u64) -> Option<u64> {
+    pub fn swap(&mut self, i: usize, v: u32) -> Option<u32> {
         let val = self.get(i)?;
         //SAFETY: This is fine because the self.get call already checked bounds.
         unsafe { self.set_unchecked(i, v) };
@@ -243,7 +243,7 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
     }
 
     #[inline]
-    pub unsafe fn swap_unchecked(&mut self, i: usize, v: u64) -> u64 {
+    pub unsafe fn swap_unchecked(&mut self, i: usize, v: u32) -> u32 {
         let val = self.get_unchecked(i);
         self.set_unchecked(i, v);
         val

@@ -67,11 +67,11 @@ pub unsafe trait DataContainer<const N: usize, V> {
     }
 }
 
-unsafe impl<const N: usize, T: super::palette::PaletteContainer<N>> DataContainer<N, u64> for T {
-    unsafe fn get_unchecked(&self, i: usize) -> u64 {
+unsafe impl<const N: usize, T: super::palette::PaletteContainer<N>> DataContainer<N, u16> for T {
+    unsafe fn get_unchecked(&self, i: usize) -> u16 {
         self.get_unchecked(i)
     }
-    unsafe fn set_unchecked(&mut self, i: usize, v: u64) {
+    unsafe fn set_unchecked(&mut self, i: usize, v: u16) {
         self.set_unchecked(i, v)
     }
 }
