@@ -55,6 +55,91 @@ pub struct BiomePaletteContainer<const N: usize, B: super::bitpack::byteorder::B
     palette: BiomePalette<N, B>,
 }
 
+macro_rules! impl_encoding_for_biome_endian {
+    ($endian:ident) => {
+        impl<const N: usize> Encode for BiomePaletteContainer<N, $endian> {
+            fn encode(
+                &self,
+                writer: &mut impl std::io::Write,
+            ) -> miners::encoding::encode::Result<()> {
+                #[inline]
+                fn encode_indirect<const N: usize>(
+                    writer: &mut impl std::io::Write,
+                    palette: &LinearPalette,
+                    data: &PackedBits<N, $endian>,
+                ) -> miners::encoding::encode::Result<()> {
+                    (palette.bits as u8).encode(writer)?; // write the amount of bits
+                    Var::<i32>::from(palette.values.len() as i32).encode(writer)?; // write the length of the palette array
+
+                    // write the palette
+                    for i in &palette.values {
+                        Var::<i32>::from(*i as i32).encode(writer)?;
+                    }
+
+                    Var::<i32>::from(data.rlen() as i32).encode(writer)?; // write the length of the data array
+                    data.encode(writer) // write the data
+                }
+
+                match &self.palette {
+                    BiomePalette::SingleValue(v) => {
+                        0u8.encode(writer)?; // write the amount of bits (0)
+                        Var::<i32>::from(v.0 as i32).encode(writer)?; // write the value
+                        Var::<i32>::from(0).encode(writer) // write the length of the data array
+                                                           // data array is empty.
+                    }
+                    BiomePalette::Linear { palette, data } => {
+                        encode_indirect(writer, palette, data)
+                    }
+                }
+            }
+        }
+
+        impl<'dec, const N: usize> Decode<'dec> for BiomePaletteContainer<N, $endian> {
+            fn decode(
+                cursor: &mut std::io::Cursor<&'dec [u8]>,
+            ) -> miners::encoding::decode::Result<Self> {
+                let bits = u8::decode(cursor)?;
+                Ok(Self {
+                    palette: match bits {
+                        0 => BiomePalette::<N, $endian>::SingleValue(SingleValuePalette(
+                            Var::<i32>::decode(cursor)?.into_inner() as u16,
+                        )),
+                        1..=3 => {
+                            let len: usize = Var::<i32>::decode(cursor)?.into_inner() as usize;
+                            let mut palette = Vec::<u16>::with_capacity(len);
+                            for _ in 0..len {
+                                palette.push(Var::<i32>::decode(cursor)?.into_inner() as u16)
+                            }
+                            let _len = Var::<i32>::decode(cursor)?;
+                            let data = PackedBits::<N, $endian>::from_reader_unchecked(
+                                cursor,
+                                bits as usize,
+                            )?;
+
+                            let linear = LinearPalette {
+                                values: palette,
+                                bits: bits as usize,
+                            };
+                            BiomePalette::Linear {
+                                palette: linear,
+                                data,
+                            }
+                        }
+                        _ => {
+                            return Err(miners::encoding::decode::Error::Custom(
+                                "invalid amount of bits for palette container!",
+                            ));
+                        }
+                    },
+                })
+            }
+        }
+    };
+}
+
+impl_encoding_for_biome_endian!(BigEndian);
+impl_encoding_for_biome_endian!(NativeEndian);
+
 enum BiomePalette<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> {
     SingleValue(SingleValuePalette),
     Linear {
