@@ -1,4 +1,9 @@
-use crate::bitpack::PackedBits;
+use miners::encoding::{attrs::Var, Decode, Encode};
+
+use crate::bitpack::{
+    byteorder::{BigEndian, NativeEndian},
+    PackedBits,
+};
 use std::collections::BTreeMap;
 
 pub unsafe trait PaletteContainer<const N: usize> {
@@ -45,8 +50,6 @@ pub unsafe trait PaletteContainer<const N: usize> {
         val
     }
 }
-
-// TODO: Reduce code duplication (with macros?)
 
 pub struct BiomePaletteContainer<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> {
     palette: BiomePalette<N, B>,
@@ -151,6 +154,127 @@ pub struct StatePaletteContainer<const N: usize, B: super::bitpack::byteorder::B
     palette: StatePalette<N, B>,
 }
 
+macro_rules! impl_encoding_for_state_endian {
+    ($endian:ident) => {
+        impl<const N: usize> Encode for StatePaletteContainer<N, $endian> {
+            fn encode(
+                &self,
+                writer: &mut impl std::io::Write,
+            ) -> miners::encoding::encode::Result<()> {
+                #[inline]
+                fn encode_indirect<const N: usize>(
+                    writer: &mut impl std::io::Write,
+                    palette: &LinearPalette,
+                    data: &PackedBits<N, $endian>,
+                ) -> miners::encoding::encode::Result<()> {
+                    (palette.bits as u8).encode(writer)?; // write the amount of bits
+                    Var::<i32>::from(palette.values.len() as i32).encode(writer)?; // write the length of the palette array
+
+                    // write the palette
+                    for i in &palette.values {
+                        Var::<i32>::from(*i as i32).encode(writer)?;
+                    }
+
+                    Var::<i32>::from(data.rlen() as i32).encode(writer)?; // write the length of the data array
+                    data.encode(writer) // write the data
+                }
+
+                match &self.palette {
+                    StatePalette::SingleValue(v) => {
+                        0u8.encode(writer)?; // write the amount of bits (0)
+                        Var::<i32>::from(v.0 as i32).encode(writer)?; // write the value
+                        Var::<i32>::from(0).encode(writer) // write the length of the data array
+                                                           // data array is empty.
+                    }
+                    StatePalette::Linear { palette, data } => {
+                        encode_indirect(writer, palette, data)
+                    }
+                    StatePalette::Mapped { palette, data } => {
+                        encode_indirect(writer, &palette.inner, data)
+                    }
+                    StatePalette::Global { data } => {
+                        15u8.encode(writer)?; // write the amount of bits
+                        Var::<i32>::from(data.rlen() as i32).encode(writer)?; // write the length of the data
+                        data.encode(writer) // write the data
+                    }
+                }
+            }
+        }
+
+        impl<'dec, const N: usize> Decode<'dec> for StatePaletteContainer<N, $endian> {
+            fn decode(
+                cursor: &mut std::io::Cursor<&'dec [u8]>,
+            ) -> miners::encoding::decode::Result<Self> {
+                let bits = u8::decode(cursor)?;
+                Ok(Self {
+                    palette: match bits {
+                        0 => StatePalette::<N, $endian>::SingleValue(SingleValuePalette(
+                            Var::<i32>::decode(cursor)?.into_inner() as u16,
+                        )),
+                        4..=8 => {
+                            let len: usize = Var::<i32>::decode(cursor)?.into_inner() as usize;
+                            let mut palette = Vec::<u16>::with_capacity(len);
+                            for _ in 0..len {
+                                palette.push(Var::<i32>::decode(cursor)?.into_inner() as u16)
+                            }
+                            let _len = Var::<i32>::decode(cursor)?;
+                            let data = PackedBits::<N, $endian>::from_reader_unchecked(
+                                cursor,
+                                bits as usize,
+                            )?;
+                            if bits > 4 {
+                                let linear = LinearPalette {
+                                    values: palette,
+                                    bits: bits as usize,
+                                };
+                                StatePalette::Linear {
+                                    palette: linear,
+                                    data,
+                                }
+                            } else {
+                                // bits == 4
+                                let mut indices = BTreeMap::new();
+                                for i in 0..palette.len() {
+                                    // SAFETY: This is fine because the len will always be in bounds due to the for loop.
+                                    unsafe { indices.insert(*palette.get_unchecked(i), i) };
+                                }
+                                let linear = LinearPalette {
+                                    values: palette,
+                                    bits: bits as usize,
+                                };
+                                StatePalette::Mapped {
+                                    palette: MappedPalette {
+                                        indices,
+                                        inner: linear,
+                                    },
+                                    data,
+                                }
+                            }
+                        }
+                        15 => {
+                            let _len = Var::<i32>::decode(cursor)?;
+                            StatePalette::Global {
+                                data: PackedBits::<N, $endian>::from_reader_unchecked(
+                                    cursor,
+                                    bits as usize,
+                                )?,
+                            }
+                        }
+                        _ => {
+                            return Err(miners::encoding::decode::Error::Custom(
+                                "invalid amount of bits for palette container!",
+                            ));
+                        }
+                    },
+                })
+            }
+        }
+    };
+}
+
+impl_encoding_for_state_endian!(BigEndian);
+impl_encoding_for_state_endian!(NativeEndian);
+
 unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> PaletteContainer<N>
     for StatePaletteContainer<N, B>
 {
@@ -232,9 +356,13 @@ unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> Palett
                         let mut values = std::mem::take(&mut palette.values);
                         // Here we double the capacity so that it is equal to 2 to the power of 5
                         values.reserve_exact(2usize.pow(4)); // values.capacity() should be equal to 2usize.pow(4)
+                        let mut indices = BTreeMap::new();
+                        for i in 0..values.len() {
+                            indices.insert(*values.get_unchecked(i), i);
+                        }
                         let palette = StatePalette::Mapped {
                             palette: MappedPalette {
-                                indices: BTreeMap::new(),
+                                indices,
                                 inner: LinearPalette { values, bits: 5 },
                             },
                             data,
@@ -276,6 +404,36 @@ unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> Palett
                 StatePalette::Global { data } => return data.set_unchecked(i, v.into()),
             }
         }
+    }
+
+    fn get(&self, i: usize) -> u16 {
+        if i >= N {
+            panic!("out of bounds")
+        }
+        //SAFETY: This is safe because we know i is in bounds.
+        unsafe { self.get_unchecked(i) }
+    }
+
+    fn set(&mut self, i: usize, v: u16) {
+        if i >= N {
+            panic!("out of bounds")
+        }
+        // SAFETY: This is sound because we just checked the bounds
+        unsafe { self.set_unchecked(i, v) }
+    }
+
+    fn swap(&mut self, i: usize, v: u16) -> u16 {
+        if i >= N {
+            panic!("out of bounds")
+        }
+        //SAFETY: This is safe because we just checked the bounds.
+        unsafe { self.swap_unchecked(i, v) }
+    }
+
+    unsafe fn swap_unchecked(&mut self, i: usize, v: u16) -> u16 {
+        let val = self.get_unchecked(i);
+        self.set_unchecked(i, v);
+        val
     }
 }
 

@@ -45,16 +45,19 @@ impl<const N: usize> AsRef<[u8]> for PackedBits<N, BigEndian> {
 }
 
 impl<const N: usize> PackedBits<N, BigEndian> {
-    pub fn from_reader_unchecked(rdr: &mut impl std::io::Read, bits: usize) -> std::io::Result<Self> {
+    pub fn from_reader_unchecked(
+        rdr: &mut impl std::io::Read,
+        bits: usize,
+    ) -> std::io::Result<Self> {
         let vpe = 64 / bits; // values per element
         let len = N / vpe;
-        
+
         let mut data = Vec::<BigEndian>::with_capacity(len);
         data.resize(len, BigEndian::ZERO);
-        
+
         // SAFETY: This is fine because a u64 is 8 bytes
         let slice = unsafe {
-            std::slice::from_raw_parts_mut(std::mem::transmute(data.as_mut_ptr()), len*8)
+            std::slice::from_raw_parts_mut(std::mem::transmute(data.as_mut_ptr()), len * 8)
         };
         rdr.read_exact(slice)?;
 
@@ -62,12 +65,12 @@ impl<const N: usize> PackedBits<N, BigEndian> {
             bits,
             data,
             vpe,
-            mask: Self::calculate_mask(bits)
+            mask: Self::calculate_mask(bits),
         })
     }
 
     pub fn from_reader(rdr: &mut impl std::io::Read, bits: usize) -> std::io::Result<Self> {
-        if bits == 0 || bits > 32  {
+        if bits == 0 || bits > 32 {
             panic!("invalid amount of bits")
         }
         Self::from_reader_unchecked(rdr, bits)
@@ -75,16 +78,19 @@ impl<const N: usize> PackedBits<N, BigEndian> {
 }
 
 impl<const N: usize> PackedBits<N, NativeEndian> {
-    pub fn from_reader_unchecked(rdr: &mut impl std::io::Read, bits: usize) -> std::io::Result<Self> {
+    pub fn from_reader_unchecked(
+        rdr: &mut impl std::io::Read,
+        bits: usize,
+    ) -> std::io::Result<Self> {
         let vpe = 64 / bits; // values per element
         let len = N / vpe;
-        
+
         let mut data = Vec::<u64>::with_capacity(len);
         data.resize(len, 0);
-        
+
         // SAFETY: This is fine because a u64 is 8 bytes
         let slice = unsafe {
-            std::slice::from_raw_parts_mut(std::mem::transmute(data.as_mut_ptr()), len*8)
+            std::slice::from_raw_parts_mut(std::mem::transmute(data.as_mut_ptr()), len * 8)
         };
         rdr.read_exact(slice)?;
 
@@ -101,12 +107,12 @@ impl<const N: usize> PackedBits<N, NativeEndian> {
             bits,
             data,
             vpe,
-            mask: Self::calculate_mask(bits)
+            mask: Self::calculate_mask(bits),
         })
     }
 
     pub fn from_reader(rdr: &mut impl std::io::Read, bits: usize) -> std::io::Result<Self> {
-        if bits == 0 || bits > 32  {
+        if bits == 0 || bits > 32 {
             panic!("invalid amount of bits")
         }
         Self::from_reader_unchecked(rdr, bits)
@@ -261,6 +267,10 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
     fn calculate_mask(bits: usize) -> u64 {
         ((((1 as u64) << bits) - 1) as u64).rotate_right(bits as u32)
     }
+
+    pub fn rlen(&self) -> usize {
+        self.data.len()
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -290,7 +300,7 @@ mod tests {
 
     #[test]
     fn bitpack_ne() {
-        let _packedbits = bitpack::<byteorder::NativeEndian>();        
+        let _packedbits = bitpack::<byteorder::NativeEndian>();
     }
 
     #[test]
