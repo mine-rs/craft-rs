@@ -1,31 +1,23 @@
-use std::borrow::Cow;
+use std::marker::PhantomData;
 
-use crate::palette::{BiomePaletteContainer, StatePaletteContainer};
+use miners::encoding::{Encode, Decode};
 
 /// A chunk column, not including heightmaps
-pub struct ChunkColumn<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> {
+pub struct ChunkColumn<const N: usize, SV, BV, S: DataContainer<4096, SV>, B: DataContainer<64, BV>> {
     //pub motion_blocking: PackedBits<256>, // len = 256 bits = 9
-    pub sections: [Option<ChunkSection<B>>; N],
+    pub sections: [Option<ChunkSection<SV, BV, S, B>>; N],
 }
 
 /// A 16 * 16 * 16 section of a chunk.
-pub struct ChunkSection<B: super::bitpack::byteorder::ByteOrderedU64> {
+pub struct ChunkSection<SV, BV, S: DataContainer<4096, SV>, B: DataContainer<64, BV>> {
     pub block_count: u16,
-    pub states: StatePaletteContainer<4096, B>, // 16*16*16 = 4096
-    pub biomes: BiomePaletteContainer<64, B>,   // 4*4*4 = 64
+    pub states: S,
+    pub biomes: B,
+    __marker: PhantomData<SV>,
+    __marker2: PhantomData<BV>
 }
 
-pub trait BlockDataContainer<B: super::bitpack::byteorder::ByteOrderedU64, V>:
-    DataContainer<4096, V>
-{
-    fn new<'a>(data: Cow<'a, [u8]>, version: miners::version::ProtocolVersion) -> Self;
-}
-
-pub trait ChunkDataContainer<const N: usize, V>: DataContainer<N, V> {
-    fn new<'a>(data: Cow<'a, [u8]>, version: miners::version::ProtocolVersion) -> Self;
-}
-
-pub unsafe trait DataContainer<const N: usize, V> {
+pub unsafe trait DataContainer<const N: usize, V>: Encode + for<'dec> Decode<'dec> {
     fn get(&self, i: usize) -> V {
         if i >= N {
             panic!("out of bounds")
@@ -67,7 +59,7 @@ pub unsafe trait DataContainer<const N: usize, V> {
     }
 }
 
-unsafe impl<const N: usize, T: super::palette::PaletteContainer<N>> DataContainer<N, u16> for T {
+unsafe impl<const N: usize, T: super::palette::PaletteContainer<N> + Encode + for<'dec> Decode<'dec>> DataContainer<N, u16> for T {
     unsafe fn get_unchecked(&self, i: usize) -> u16 {
         self.get_unchecked(i)
     }
