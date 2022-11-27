@@ -17,6 +17,29 @@ pub struct ChunkSection<SV, BV, S: DataContainer<4096, SV>, B: DataContainer<64,
     __marker2: PhantomData<BV>
 }
 
+impl<SV, BV, S: DataContainer<4096, SV>, B: DataContainer<64, BV>> Encode for ChunkSection<SV, BV, S, B> {
+    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
+        self.block_count.encode(writer)?;
+        self.states.encode(writer)?;
+        self.biomes.encode(writer)
+    }
+}
+
+impl<SV, BV, S: DataContainer<4096, SV>, B: DataContainer<64, BV>> Decode<'_> for ChunkSection<SV, BV, S, B> {
+    fn decode(cursor: &mut std::io::Cursor<&'_ [u8]>) -> miners::encoding::decode::Result<Self> {
+        Ok(
+            Self {
+                block_count: u16::decode(cursor)?,
+                states: S::decode(cursor)?,
+                biomes: B::decode(cursor)?,
+                __marker: PhantomData,
+                __marker2: PhantomData
+            }
+        )
+    }
+}
+
+
 pub unsafe trait DataContainer<const N: usize, V>: Encode + for<'dec> Decode<'dec> {
     fn get(&self, i: usize) -> V {
         if i >= N {
