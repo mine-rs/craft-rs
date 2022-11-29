@@ -7,7 +7,7 @@ use miners::encoding::{Encode, Decode};
 /// SV = type used to represent the block states
 /// BV = type used to represent the biomes
 /// S = the data container used to store the states
-/// B: the data container used to store the biomes
+/// B = the data container used to store the biomes
 pub struct ChunkColumn<const N: usize, SV, BV, S: DataContainer<4096, SV>, B: DataContainer<64, BV>> {
     //pub motion_blocking: PackedBits<256>, // len = 256 bits = 9
     pub sections: [Option<ChunkSection<SV, BV, S, B>>; N],
