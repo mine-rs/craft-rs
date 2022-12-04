@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use miners::encoding::{Decode, Encode};
 
-use crate::containers::{DataContainer, ByteArray, half_byte_array};
+use crate::containers::{half_byte_array, ByteArray, DataContainer};
 
 /// A chunk column, not including heightmaps
 pub struct ChunkColumn<const N: usize, S> {
