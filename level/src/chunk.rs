@@ -2,20 +2,20 @@ use std::marker::PhantomData;
 
 use miners::encoding::{Decode, Encode};
 
-use crate::containers::{DataContainer, ByteArray, HalfByteArray};
+use crate::containers::{DataContainer, ByteArray, half_byte_array};
 
 /// A chunk column, not including heightmaps
 pub struct ChunkColumn<const N: usize, S> {
     pub sections: [Option<S>; N],
 }
 
-pub struct ChunkSection0 {
+pub struct ChunkSection0<'a> {
     pub blocks: ByteArray<4096>,
-    pub metadata: HalfByteArray,
-    pub light: HalfByteArray,
-    pub sky_light: Option<HalfByteArray>,
-    pub add: Option<HalfByteArray>,
-    pub biomes: Box<HalfByteArray>,
+    pub metadata: half_byte_array!('a, 4096),
+    pub light: half_byte_array!('a, 4096),
+    pub sky_light: Option<half_byte_array!('a, 4096)>,
+    pub add: Option<half_byte_array!('a, 4096)>,
+    pub biomes: Box<half_byte_array!('a, 4096)>,
 }
 
 /// A 16 * 16 * 16 section of a chunk.

@@ -4,7 +4,7 @@ pub mod bitpack;
 pub mod palette;
 
 #[derive(Clone)]
-pub struct ByteArray<const N: usize>(Box<[u8; 4096]>);
+pub struct ByteArray<const N: usize>(Box<[u8; N]>);
 
 
 impl<const N: usize> Encode for ByteArray<N> {
@@ -31,62 +31,77 @@ impl<'dec, const N: usize> Decode<'dec> for ByteArray<N> {
     }
 }
 
-#[derive(Clone)]
-#[repr(transparent)]
-pub struct HalfByteArray(Box<[u8; Self::RLEN]>);
+pub use crate::half_byte_array;
 
-impl Encode for HalfByteArray {
-    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
-        writer.write_all(self.0.as_ref()).map_err(From::from)
-    }
+#[macro_export]
+macro_rules! half_byte_array {
+    ($l:lifetime, $len:literal) => {
+        $crate::containers::__private::HalfByteArray<$l, {$len}, {$len/2}>
+    };
 }
+pub mod __private {
+    use std::borrow::Cow;
 
-impl<'dec> Decode<'dec> for HalfByteArray {
-    fn decode(cursor: &mut std::io::Cursor<&'dec [u8]>) -> miners::encoding::decode::Result<Self> {
-        //TODO: Use BorrowedRead once it is stabilised instead of this mess
-        let pos = cursor.position() as usize;
-        //this would prevent a panic in case of an unexpected EOF
-        let slice = cursor
-            .get_ref()
-            .get(pos..pos + Self::RLEN as usize)
-            .ok_or(miners::encoding::decode::Error::UnexpectedEndOfSlice)?;
-        cursor.set_position((pos + Self::RLEN) as u64);
-        debug_assert_eq!(slice.len(), Self::RLEN);
-        let data = (slice as *const [u8]).cast();
-        // SAFETY: This is safe because we created the ptr from a slice that we know has a len of RLEN
-        let this = unsafe { Box::new(*data) };
-        Ok(Self(this))
-    }
-}
+    use miners::encoding::{Encode, Decode};
 
-impl HalfByteArray {
-    const LEN: usize = 4098;
-    const RLEN: usize = 2048;
+    use super::DataContainer;
 
-    pub fn new() -> Self {
-        Self(Box::new([0; Self::RLEN]))
-    }
-}
-
-unsafe impl DataContainer<{ Self::LEN }, u8> for HalfByteArray {
-    unsafe fn get_unchecked(&self, i: usize) -> u8 {
-        let byte = *self.0.get_unchecked(i / 2);
-        if i % 2 == 0 {
-            (byte & 0xf0) >> 4
-        } else {
-            byte & 0x0f
+    #[derive(Clone)]
+    #[repr(transparent)]
+    pub struct HalfByteArray<'a, const LEN: usize, const RLEN: usize>(Cow<'a, [u8; RLEN]>);
+    
+    impl<const LEN: usize, const RLEN: usize> Encode for HalfByteArray<'_, LEN, RLEN> {
+        fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
+            writer.write_all(self.0.as_ref()).map_err(From::from)
         }
     }
-
-    unsafe fn set_unchecked(&mut self, i: usize, v: u8) {
-        let byte = self.0.get_unchecked_mut(i / 2);
-        if i % 2 == 0 {
-            *byte = *byte & (v << 4)
-        } else {
-            *byte = *byte & v
+    
+    impl<'dec, const LEN: usize, const RLEN: usize> Decode<'dec> for HalfByteArray<'_, LEN, RLEN> {
+        fn decode(cursor: &mut std::io::Cursor<&'dec [u8]>) -> miners::encoding::decode::Result<Self> {
+            //TODO: Use BorrowedRead once it is stabilised instead of this mess
+            let pos = cursor.position() as usize;
+            //this would prevent a panic in case of an unexpected EOF
+            let slice = cursor
+                .get_ref()
+                .get(pos..pos + RLEN as usize)
+                .ok_or(miners::encoding::decode::Error::UnexpectedEndOfSlice)?;
+            cursor.set_position((pos + RLEN) as u64);
+            debug_assert_eq!(slice.len(), RLEN);
+            // SAFETY: This is safe because we created the ptr from a slice that we know has a len of RLEN
+            let data = unsafe { *(slice as *const [u8]).cast() };
+            //let this = unsafe { Box::new(data) };
+            Ok(Self(Cow::Borrowed(data)))
+        }
+    }
+    
+    impl<const LEN: usize, const RLEN: usize> HalfByteArray<'_, LEN, RLEN> {
+        pub fn new() -> Self {
+            Self(Cow::Owned([0; RLEN]))
+        }
+    }
+    
+    unsafe impl<const LEN: usize, const RLEN: usize> DataContainer<{ LEN }, u8> for HalfByteArray<'_, LEN, RLEN> {
+        unsafe fn get_unchecked(&self, i: usize) -> u8 {
+            let byte = *self.0.get_unchecked(i / 2);
+            if i % 2 == 0 {
+                (byte & 0xf0) >> 4
+            } else {
+                byte & 0x0f
+            }
+        }
+    
+        unsafe fn set_unchecked(&mut self, i: usize, v: u8) {
+            self.0 = self.0.to_owned();
+            let byte = self.0.to_mut().get_unchecked_mut(i / 2);
+            if i % 2 == 0 {
+                *byte = *byte & (v << 4)
+            } else {
+                *byte = *byte & v
+            }
         }
     }
 }
+
 
 pub unsafe trait DataContainer<const N: usize, V>: Encode + for<'dec> Decode<'dec> {
     fn get(&self, i: usize) -> V {
