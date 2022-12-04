@@ -10,7 +10,7 @@ pub struct ChunkColumn<const N: usize, S> {
 }
 
 pub struct ChunkSection0<'a> {
-    pub blocks: ByteArray<4096>,
+    pub blocks: ByteArray<'a, 4096>,
     pub metadata: half_byte_array!('a, 4096),
     pub light: half_byte_array!('a, 4096),
     pub sky_light: Option<half_byte_array!('a, 4096)>,

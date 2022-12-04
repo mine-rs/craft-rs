@@ -1,10 +1,22 @@
+use std::borrow::Cow;
+
 use miners::encoding::{Decode, Encode};
 
 pub mod bitpack;
 pub mod palette;
 
 #[derive(Clone)]
-pub struct ByteArray<const N: usize>(Box<[u8; N]>);
+pub struct ByteArray<'a, const N: usize>(Cow<'a, [u8; N]>);
+
+unsafe impl<const N: usize> DataContainer<N, u8> for ByteArray<'_, N> {
+    unsafe fn get_unchecked(&self, i: usize) -> u8 {
+        *self.0.get_unchecked(i)
+    }
+
+    unsafe fn set_unchecked(&mut self, i: usize, v: u8) {
+        *self.0.to_mut().get_unchecked_mut(i) = v
+    }
+}
 
 #[inline]
 fn decode_slice<'dec, const N: usize>(
@@ -20,19 +32,19 @@ fn decode_slice<'dec, const N: usize>(
     Ok(slice)
 }
 
-impl<const N: usize> Encode for ByteArray<N> {
+impl<const N: usize> Encode for ByteArray<'_, N> {
     fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
         writer.write_all(self.0.as_ref()).map_err(From::from)
     }
 }
 
-impl<'dec, const N: usize> Decode<'dec> for ByteArray<N> {
+impl<'dec, const N: usize> Decode<'dec> for ByteArray<'_, N> {
     fn decode(cursor: &mut std::io::Cursor<&'dec [u8]>) -> miners::encoding::decode::Result<Self> {
         let slice = decode_slice::<N>(cursor)?;
-        let data = (slice as *const [u8]).cast();
         // SAFETY: This is safe because we created the ptr from a slice that we know has a len of RLEN
-        let this = unsafe { Box::new(*data) };
-        Ok(Self(this))
+        let data = unsafe { *(slice as *const [u8]).cast() };
+        //let this = unsafe { Box::new(data) };
+        Ok(Self(Cow::Borrowed(data)))
     }
 }
 
@@ -95,7 +107,6 @@ pub mod __private {
         }
 
         unsafe fn set_unchecked(&mut self, i: usize, v: u8) {
-            self.0 = self.0.to_owned();
             let byte = self.0.to_mut().get_unchecked_mut(i / 2);
             if i % 2 == 0 {
                 *byte = *byte & (v << 4)
