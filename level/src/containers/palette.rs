@@ -1,6 +1,6 @@
 use miners::encoding::{attrs::Var, Decode, Encode};
 
-use crate::bitpack::{
+use super::bitpack::{
     byteorder::{BigEndian, NativeEndian},
     PackedBits,
 };
@@ -635,8 +635,8 @@ impl Palette for MappedPalette {
 
 #[cfg(test)]
 mod tests {
+    use super::super::bitpack::byteorder;
     use super::{BiomePaletteContainer, PaletteContainer, StatePaletteContainer};
-    use crate::bitpack::byteorder;
 
     #[test]
     fn state() {

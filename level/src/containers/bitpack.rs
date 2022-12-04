@@ -1,6 +1,5 @@
-use miners::encoding::Encode;
-
 use self::byteorder::{BigEndian, NativeEndian};
+use miners::encoding::Encode;
 
 pub(crate) mod byteorder;
 
