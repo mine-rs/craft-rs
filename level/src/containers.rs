@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{ops::Deref, mem::transmute};
 
 use miners::encoding::{Decode, Encode};
 
@@ -6,15 +6,59 @@ pub mod bitpack;
 pub mod palette;
 
 #[derive(Clone)]
-pub struct ByteArray<'a, const N: usize>(Cow<'a, [u8; N]>);
+#[repr(transparent)]
+pub struct ByteArray<'a, const N: usize>(&'a [u8; N]);
 
-unsafe impl<const N: usize> DataContainer<N, u8> for ByteArray<'_, N> {
+impl<const N: usize> Encode for ByteArray<'_, N> {
+    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
+        writer.write_all(self.0.as_ref()).map_err(From::from)
+    }
+}
+
+impl<'dec, const N: usize> Decode<'dec> for ByteArray<'_, N> {
+    fn decode(cursor: &mut std::io::Cursor<&'dec [u8]>) -> miners::encoding::decode::Result<Self> {
+        let slice = decode_slice::<N>(cursor)?;
+        // SAFETY: This is safe because we created the ptr from a slice that we know has a len of RLEN
+        let data = unsafe { *(slice as *const [u8]).cast() };
+        //let this = unsafe { Box::new(data) };
+        Ok(Self(data))
+    }
+}
+
+unsafe impl<const N: usize> ReadContainer<N, u8> for ByteArray<'_, N> {
     unsafe fn get_unchecked(&self, i: usize) -> u8 {
         *self.0.get_unchecked(i)
     }
+}
 
+#[repr(transparent)]
+pub struct ByteArrayMut<'a, const N: usize>(&'a mut [u8; N]);
+
+impl<'a, const N: usize> Deref for ByteArrayMut<'a, N> {
+    type Target = ByteArray<'a, N>;
+
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: This is fine because the types have the same layout
+        unsafe { transmute(self) }
+    }
+
+}
+
+impl<const N: usize> Encode for ByteArrayMut<'_, N> {
+    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
+        self.0.encode(writer)
+    }
+}
+
+unsafe impl<const N: usize> ReadContainer<N, u8> for ByteArrayMut<'_, N> {
+    unsafe fn get_unchecked(&self, i: usize) -> u8 {
+        self.deref().get_unchecked(i)
+    }
+} 
+
+unsafe impl<const N: usize> WriteContainer<N, u8> for ByteArrayMut<'_, N> {
     unsafe fn set_unchecked(&mut self, i: usize, v: u8) {
-        *self.0.to_mut().get_unchecked_mut(i) = v
+        *self.0.get_unchecked_mut(i) = v
     }
 }
 
@@ -32,22 +76,6 @@ fn decode_slice<'dec, const N: usize>(
     Ok(slice)
 }
 
-impl<const N: usize> Encode for ByteArray<'_, N> {
-    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
-        writer.write_all(self.0.as_ref()).map_err(From::from)
-    }
-}
-
-impl<'dec, const N: usize> Decode<'dec> for ByteArray<'_, N> {
-    fn decode(cursor: &mut std::io::Cursor<&'dec [u8]>) -> miners::encoding::decode::Result<Self> {
-        let slice = decode_slice::<N>(cursor)?;
-        // SAFETY: This is safe because we created the ptr from a slice that we know has a len of RLEN
-        let data = unsafe { *(slice as *const [u8]).cast() };
-        //let this = unsafe { Box::new(data) };
-        Ok(Self(Cow::Borrowed(data)))
-    }
-}
-
 pub use crate::half_byte_array;
 
 // We have to do this weird macro stuff because rust doesn't allow use to use const expressions with const params.
@@ -60,15 +88,15 @@ macro_rules! half_byte_array {
 }
 
 pub mod __private {
-    use std::borrow::Cow;
+    use std::{ops::Deref, mem::transmute};
 
     use miners::encoding::{Decode, Encode};
 
-    use super::DataContainer;
+    use super::{ReadContainer, WriteContainer};
 
     #[derive(Clone)]
     #[repr(transparent)]
-    pub struct HalfByteArray<'a, const LEN: usize, const RLEN: usize>(Cow<'a, [u8; RLEN]>);
+    pub struct HalfByteArray<'a, const LEN: usize, const RLEN: usize>(&'a [u8; RLEN]);
 
     impl<const LEN: usize, const RLEN: usize> Encode for HalfByteArray<'_, LEN, RLEN> {
         fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
@@ -84,17 +112,11 @@ pub mod __private {
             // SAFETY: This is safe because we created the ptr from a slice that we know has a len of RLEN
             let data = unsafe { *(slice as *const [u8]).cast() };
             //let this = unsafe { Box::new(data) };
-            Ok(Self(Cow::Borrowed(data)))
+            Ok(Self(data))
         }
     }
 
-    impl<const LEN: usize, const RLEN: usize> HalfByteArray<'_, LEN, RLEN> {
-        pub fn new() -> Self {
-            Self(Cow::Owned([0; RLEN]))
-        }
-    }
-
-    unsafe impl<const LEN: usize, const RLEN: usize> DataContainer<{ LEN }, u8>
+    unsafe impl<const LEN: usize, const RLEN: usize> ReadContainer<{ LEN }, u8>
         for HalfByteArray<'_, LEN, RLEN>
     {
         unsafe fn get_unchecked(&self, i: usize) -> u8 {
@@ -106,8 +128,31 @@ pub mod __private {
             }
         }
 
+    }
+
+    #[repr(transparent)]
+    pub struct HalfByteArrayMut<'a, const LEN: usize, const RLEN: usize>(&'a mut [u8; RLEN]);
+
+    unsafe impl<const LEN: usize, const RLEN: usize> ReadContainer<{ LEN }, u8> for HalfByteArrayMut<'_, LEN, RLEN> {
+        unsafe fn get_unchecked(&self, i: usize) -> u8 {
+            self.deref().get_unchecked(i)
+        }
+    }
+
+    impl<'a, const LEN: usize, const RLEN: usize> Deref for HalfByteArrayMut<'a, LEN, RLEN> {
+        type Target = HalfByteArray<'a, LEN, RLEN>;
+
+        fn deref(&self) -> &Self::Target {
+            // SAFETY: This is fine because the types have the exact same layout
+            unsafe { transmute(self) }
+        }
+    }
+
+    unsafe impl<const LEN: usize, const RLEN: usize> WriteContainer<{ LEN }, u8>
+        for HalfByteArrayMut<'_, LEN, RLEN>
+    {
         unsafe fn set_unchecked(&mut self, i: usize, v: u8) {
-            let byte = self.0.to_mut().get_unchecked_mut(i / 2);
+            let byte = self.0.get_unchecked_mut(i / 2);
             if i % 2 == 0 {
                 *byte = *byte & (v << 4)
             } else {
@@ -117,7 +162,7 @@ pub mod __private {
     }
 }
 
-pub unsafe trait DataContainer<const N: usize, V>: Encode + for<'dec> Decode<'dec> {
+pub unsafe trait ReadContainer<const N: usize, V>: /*Encode + for<'dec> Decode<'dec>*/ {
     fn get(&self, i: usize) -> V {
         if i >= N {
             panic!("out of bounds")
@@ -129,7 +174,9 @@ pub unsafe trait DataContainer<const N: usize, V>: Encode + for<'dec> Decode<'de
     /// # Safety
     /// This method is safe as long as `i` is within bounds.
     unsafe fn get_unchecked(&self, i: usize) -> V;
+}
 
+pub unsafe trait WriteContainer<const N: usize, V>: ReadContainer<N, V> {
     fn set(&mut self, i: usize, v: V) {
         if i >= N {
             panic!("out of bounds")
@@ -159,12 +206,15 @@ pub unsafe trait DataContainer<const N: usize, V>: Encode + for<'dec> Decode<'de
     }
 }
 
-unsafe impl<const N: usize, T: palette::PaletteContainer<N> + Encode + for<'dec> Decode<'dec>>
-    DataContainer<N, u16> for T
+unsafe impl<const N: usize, T: palette::PaletteContainer<N>>
+    ReadContainer<N, u16> for T
 {
     unsafe fn get_unchecked(&self, i: usize) -> u16 {
         self.get_unchecked(i)
     }
+}
+
+unsafe impl<const N: usize, T: palette::PaletteContainer<N>> WriteContainer<N, u16> for T {
     unsafe fn set_unchecked(&mut self, i: usize, v: u16) {
         self.set_unchecked(i, v)
     }

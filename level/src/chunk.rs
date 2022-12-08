@@ -1,8 +1,6 @@
-use std::marker::PhantomData;
-
 use miners::encoding::{Decode, Encode};
 
-use crate::containers::{half_byte_array, ByteArray, DataContainer};
+use crate::containers::{half_byte_array, ByteArray};
 
 /// A chunk column, not including heightmaps
 pub struct ChunkColumn<const N: usize, S> {
@@ -19,16 +17,14 @@ pub struct ChunkSection0<'a> {
 }
 
 /// A 16 * 16 * 16 section of a chunk.
-pub struct ChunkSection<SV, BV, S: DataContainer<4096, SV>, B: DataContainer<64, BV>> {
+pub struct ChunkSection<S, B> {
     pub block_count: u16,
     pub states: S,
     pub biomes: B,
-    __marker: PhantomData<SV>,
-    __marker2: PhantomData<BV>,
 }
 
-impl<SV, BV, S: DataContainer<4096, SV>, B: DataContainer<64, BV>> Encode
-    for ChunkSection<SV, BV, S, B>
+impl<S: Encode, B: Encode> Encode
+    for ChunkSection<S, B>
 {
     fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
         self.block_count.encode(writer)?;
@@ -37,16 +33,14 @@ impl<SV, BV, S: DataContainer<4096, SV>, B: DataContainer<64, BV>> Encode
     }
 }
 
-impl<SV, BV, S: DataContainer<4096, SV>, B: DataContainer<64, BV>> Decode<'_>
-    for ChunkSection<SV, BV, S, B>
+impl<S: for<'a> Decode<'a>, B: for<'a> Decode<'a>> Decode<'_>
+    for ChunkSection<S, B>
 {
     fn decode(cursor: &mut std::io::Cursor<&'_ [u8]>) -> miners::encoding::decode::Result<Self> {
         Ok(Self {
             block_count: u16::decode(cursor)?,
             states: S::decode(cursor)?,
             biomes: B::decode(cursor)?,
-            __marker: PhantomData,
-            __marker2: PhantomData,
         })
     }
 }
