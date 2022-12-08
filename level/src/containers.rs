@@ -1,13 +1,19 @@
-use std::{ops::Deref, mem::transmute};
+use std::{mem::transmute, ops::Deref};
 
 use miners::encoding::{Decode, Encode};
 
 pub mod bitpack;
 pub mod palette;
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct ByteArray<'a, const N: usize>(&'a [u8; N]);
+
+impl<'a, const N: usize> Into<&'a [u8; N]> for ByteArray<'a, N> {
+    fn into(self) -> &'a [u8; N] {
+        self.0
+    }
+}
 
 impl<const N: usize> Encode for ByteArray<'_, N> {
     fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
@@ -41,7 +47,6 @@ impl<'a, const N: usize> Deref for ByteArrayMut<'a, N> {
         // SAFETY: This is fine because the types have the same layout
         unsafe { transmute(self) }
     }
-
 }
 
 impl<const N: usize> Encode for ByteArrayMut<'_, N> {
@@ -54,7 +59,7 @@ unsafe impl<const N: usize> ReadContainer<N, u8> for ByteArrayMut<'_, N> {
     unsafe fn get_unchecked(&self, i: usize) -> u8 {
         self.deref().get_unchecked(i)
     }
-} 
+}
 
 unsafe impl<const N: usize> WriteContainer<N, u8> for ByteArrayMut<'_, N> {
     unsafe fn set_unchecked(&mut self, i: usize, v: u8) {
@@ -82,21 +87,42 @@ pub use crate::half_byte_array;
 /// A macro to access the HalfByteArray struct.
 #[macro_export]
 macro_rules! half_byte_array {
+    ($f:ident) => {
+        $crate::containers::__private::HalfByteArray::$f
+    };
     ($l:lifetime, $len:literal) => {
         $crate::containers::__private::HalfByteArray<$l, {$len}, {$len/2}>
     };
 }
 
+#[macro_export]
+macro_rules! half_byte_array_mut {
+    ($f:ident) => {
+        $crate::containers::__private::HalfByteArrayMut::$f
+    };
+    ($l:lifetime, $len:literal) => {
+        $crate::containers::__private::HalfByteArrayMut<$l, {$len}, {$len/2}>
+    };
+}
+
 pub mod __private {
-    use std::{ops::Deref, mem::transmute};
+    use std::{mem::transmute, ops::Deref};
 
     use miners::encoding::{Decode, Encode};
 
     use super::{ReadContainer, WriteContainer};
 
-    #[derive(Clone)]
+    #[derive(Clone, Copy)]
     #[repr(transparent)]
     pub struct HalfByteArray<'a, const LEN: usize, const RLEN: usize>(&'a [u8; RLEN]);
+
+    impl<'a, const LEN: usize, const RLEN: usize> Into<&'a [u8; RLEN]>
+        for HalfByteArray<'a, LEN, RLEN>
+    {
+        fn into(self) -> &'a [u8; RLEN] {
+            self.0
+        }
+    }
 
     impl<const LEN: usize, const RLEN: usize> Encode for HalfByteArray<'_, LEN, RLEN> {
         fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
@@ -127,13 +153,14 @@ pub mod __private {
                 byte & 0x0f
             }
         }
-
     }
 
     #[repr(transparent)]
     pub struct HalfByteArrayMut<'a, const LEN: usize, const RLEN: usize>(&'a mut [u8; RLEN]);
 
-    unsafe impl<const LEN: usize, const RLEN: usize> ReadContainer<{ LEN }, u8> for HalfByteArrayMut<'_, LEN, RLEN> {
+    unsafe impl<const LEN: usize, const RLEN: usize> ReadContainer<{ LEN }, u8>
+        for HalfByteArrayMut<'_, LEN, RLEN>
+    {
         unsafe fn get_unchecked(&self, i: usize) -> u8 {
             self.deref().get_unchecked(i)
         }
@@ -162,7 +189,7 @@ pub mod __private {
     }
 }
 
-pub unsafe trait ReadContainer<const N: usize, V>: /*Encode + for<'dec> Decode<'dec>*/ {
+pub unsafe trait ReadContainer<const N: usize, V> /*Encode + for<'dec> Decode<'dec>*/ {
     fn get(&self, i: usize) -> V {
         if i >= N {
             panic!("out of bounds")
@@ -206,9 +233,7 @@ pub unsafe trait WriteContainer<const N: usize, V>: ReadContainer<N, V> {
     }
 }
 
-unsafe impl<const N: usize, T: palette::PaletteContainer<N>>
-    ReadContainer<N, u16> for T
-{
+unsafe impl<const N: usize, T: palette::PaletteContainer<N>> ReadContainer<N, u16> for T {
     unsafe fn get_unchecked(&self, i: usize) -> u16 {
         self.get_unchecked(i)
     }
