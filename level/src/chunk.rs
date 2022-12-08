@@ -1,6 +1,5 @@
 use std::{
     mem::{ManuallyDrop, MaybeUninit},
-    ptr::addr_of_mut,
 };
 
 use miners::encoding::{Decode, Encode};
@@ -23,9 +22,11 @@ pub struct ChunkColumn0 {
 }
 
 #[inline]
-const fn get_bit_as_bool(bitmask: u16, n: u16) -> bool {
-    // SAFETY: This is safe because we know bitmask & (1 << n) >> n) will always be 1 or 0
-    unsafe { std::mem::transmute((bitmask & (1 << n) >> n) as u8) }
+const fn get_bit_as_bool(bitmask: u16, n: u8) -> bool {
+    // SAFETY: This is safe because we know (bitmask & (1 << n)) >> n) will always be 1 or 0
+    let n = n & 0b1111;
+
+    ((bitmask & (1 << n)) >> n) != 0
 }
 
 impl ChunkColumn0 {
@@ -48,7 +49,7 @@ impl ChunkColumn0 {
         let mut nadd = 0;
         let mut nsky_light = 0;
         // create sections according to the bitmask
-        for i in 0u16..16 {
+        for i in 0u8..16 {
             let exists: bool = get_bit_as_bool(bitmask, i);
             let add: bool = get_bit_as_bool(bitmask, i);
             let sky_light: bool = get_bit_as_bool(bitmask, i);
@@ -67,15 +68,17 @@ impl ChunkColumn0 {
                 nsections += 1;
             }
         }
-        const MINIMUM_SECTION_SIZE: usize = 4096 + 3 * 2048;
-        let data = Vec::<u8>::with_capacity(
-            (nsections * MINIMUM_SECTION_SIZE) + (nsky_light * 2048) + (nadd * 2048),
-        )
-        .as_mut_ptr();
+        const MINIMUM_SECTION_SIZE: usize = 4096 + (3 * 2048);
+        println!("{MINIMUM_SECTION_SIZE}");
+        let size = (nsections * MINIMUM_SECTION_SIZE) + (nsky_light * 2048) + (nadd * 2048);
+        println!("{size}");
+        let mut vec = Vec::<u8>::with_capacity(size);
+        let data = vec.as_mut_ptr();
+        std::mem::forget(vec);
 
         // loop through the sections
         let mut p = data;
-        for i in 0u16..16 {
+        for i in 0u8..16 {
             let exists = get_bit_as_bool(bitmask, i);
             if exists {
                 #[inline]
@@ -219,5 +222,63 @@ impl<S: for<'a> Decode<'a>, B: for<'a> Decode<'a>> Decode<'_> for ChunkSection<S
             states: S::decode(cursor)?,
             biomes: B::decode(cursor)?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{get_bit_as_bool, ChunkColumn0};
+
+    #[test]
+    fn t_get_bit_as_bool() {
+        let bitmask = 0b1010101010101010u16;
+        for i in 0u8..16 {
+            let bit = get_bit_as_bool(bitmask, i);
+            if i % 2 == 0 && bit {
+                panic!("{i}th bit should be 0!")
+            }
+            if i % 2 == 1 && !bit {
+                panic!("bit {i} should be 1!")
+            }
+        }
+    }
+
+    #[test]
+    fn pv0() {
+        // first we generate the data
+        //TODO: use real data from minecraft
+        let bitmask = 0b1011001110110011u16;
+        let add = 0b1001001010010010u16;
+        let sky_light = 0b0010000100100001u16;
+
+        let mut data = Vec::<u8>::new();
+
+        for i in 0u8..16 {
+            let exists = get_bit_as_bool(bitmask, i);
+            let add = get_bit_as_bool(add, i);
+            print!("{:b}", add as u8);
+            let sky_light = get_bit_as_bool(bitmask, i);
+            if exists {
+                for i in 0u16..4096 {
+                    data.push(i as u8);
+                    data.push(((i & 0xf0) >> 8 ) as u8)
+                }
+            }
+            if add {
+                for i in 0u16..2048 {
+                    data.push(i as u8)
+                }
+            }
+            if sky_light {
+                for i in 0u16..2048 {
+                    data.push(i as u8)
+                }
+            }
+            for i in 0u16..2048 {
+                data.push(i as u8)
+            }
+        }
+
+        let chunk = ChunkColumn0::from_reader(&mut std::io::Cursor::new(&data), bitmask, add, sky_light).unwrap();
     }
 }

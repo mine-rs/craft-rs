@@ -25,7 +25,7 @@ impl<'dec, const N: usize> Decode<'dec> for ByteArray<'_, N> {
     fn decode(cursor: &mut std::io::Cursor<&'dec [u8]>) -> miners::encoding::decode::Result<Self> {
         let slice = decode_slice::<N>(cursor)?;
         // SAFETY: This is safe because we created the ptr from a slice that we know has a len of RLEN
-        let data = unsafe { *(slice as *const [u8]).cast() };
+        let data: &[u8; N] = unsafe { (slice.as_ptr().cast() as *const [u8; N]).as_ref().unwrap() };
         //let this = unsafe { Box::new(data) };
         Ok(Self(data))
     }
@@ -136,7 +136,7 @@ pub mod __private {
         ) -> miners::encoding::decode::Result<Self> {
             let slice = super::decode_slice::<RLEN>(cursor)?;
             // SAFETY: This is safe because we created the ptr from a slice that we know has a len of RLEN
-            let data = unsafe { *(slice as *const [u8]).cast() };
+            let data: &[u8; RLEN] = unsafe { (slice.as_ptr().cast() as *const [u8; RLEN]).as_ref().unwrap() };
             //let this = unsafe { Box::new(data) };
             Ok(Self(data))
         }
