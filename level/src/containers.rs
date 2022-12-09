@@ -40,6 +40,12 @@ unsafe impl<const N: usize> ReadContainer<N, u8> for ByteArray<'_, N> {
 #[repr(transparent)]
 pub struct ByteArrayMut<'a, const N: usize>(&'a mut [u8; N]);
 
+impl<'a, const N: usize> From<&'a mut [u8; N]> for ByteArrayMut<'a, N> {
+    fn from(value: &'a mut [u8; N]) -> Self {
+        Self(value)
+    }
+}
+
 impl<'a, const N: usize> Deref for ByteArrayMut<'a, N> {
     type Target = ByteArray<'a, N>;
 
@@ -157,6 +163,12 @@ pub mod __private {
 
     #[repr(transparent)]
     pub struct HalfByteArrayMut<'a, const LEN: usize, const RLEN: usize>(&'a mut [u8; RLEN]);
+
+    impl<'a, const LEN: usize, const RLEN: usize> From<&'a mut [u8; RLEN]> for HalfByteArrayMut<'a, LEN, RLEN> {
+        fn from(value: &'a mut [u8; RLEN]) -> Self {
+            Self(value)
+        }
+    }
 
     unsafe impl<const LEN: usize, const RLEN: usize> ReadContainer<{ LEN }, u8>
         for HalfByteArrayMut<'_, LEN, RLEN>
