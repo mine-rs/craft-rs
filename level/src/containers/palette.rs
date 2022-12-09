@@ -6,12 +6,13 @@ use super::bitpack::{
 };
 use std::collections::BTreeMap;
 
-pub unsafe trait PaletteContainer<const N: usize> {
+pub unsafe trait PaletteContainer {
+    const N: usize;
     fn new(value: u16) -> Self;
     fn with_bits(bits: usize, value: u16) -> Self;
 
     fn get(&self, i: usize) -> u16 {
-        if i >= N {
+        if i >= Self::N {
             panic!("out of bounds")
         }
         //SAFETY: This is safe because we know i is in bounds.
@@ -23,7 +24,7 @@ pub unsafe trait PaletteContainer<const N: usize> {
     unsafe fn get_unchecked(&self, i: usize) -> u16;
 
     fn set(&mut self, i: usize, v: u16) {
-        if i >= N {
+        if i >= Self::N {
             panic!("out of bounds")
         }
         // SAFETY: This is sound because we just checked the bounds
@@ -35,7 +36,7 @@ pub unsafe trait PaletteContainer<const N: usize> {
     unsafe fn set_unchecked(&mut self, i: usize, v: u16);
 
     fn swap(&mut self, i: usize, v: u16) -> u16 {
-        if i >= N {
+        if i >= Self::N {
             panic!("out of bounds")
         }
         //SAFETY: This is safe because we just checked the bounds.
@@ -149,9 +150,10 @@ enum BiomePalette<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> 
 }
 
 // SAFETY: This is fine because we uphold all of the invariants
-unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> PaletteContainer<N>
+unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> PaletteContainer
     for BiomePaletteContainer<N, B>
 {
+    const N: usize = N;
     fn new(value: u16) -> Self {
         Self {
             palette: BiomePalette::SingleValue(SingleValuePalette(value)),
@@ -362,9 +364,10 @@ impl_encoding_for_state_endian!(BigEndian);
 impl_encoding_for_state_endian!(NativeEndian);
 
 // SAFETY: This is fine because we uphold all of the invariants
-unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> PaletteContainer<N>
+unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> PaletteContainer
     for StatePaletteContainer<N, B>
 {
+    const N: usize = N;
     fn new(value: u16) -> Self {
         Self {
             palette: StatePalette::SingleValue(SingleValuePalette(value)),
