@@ -131,8 +131,8 @@ impl ChunkColumn0<'_> {
         // create sections according to the bitmask
         for i in 0u8..16 {
             let exists: bool = bit_at(bitmask, i);
-            let add: bool = bit_at(bitmask, i);
-            let sky_light: bool = bit_at(bitmask, i);
+            let add: bool = bit_at(add, i);
+            let sky_light: bool = bit_at(sky_light, i);
             if exists {
                 sections[i as usize] = ChunkSection {
                     decode: MaybeUninit::new(ChunkSection0Decode::from_reader(
@@ -173,8 +173,8 @@ impl ChunkColumn0<'_> {
                     &mut *p
                 }
 
-                let add: bool = bit_at(bitmask, i);
-                let sky_light: bool = bit_at(bitmask, i);
+                let add: bool = bit_at(add, i);
+                let sky_light: bool = bit_at(sky_light, i);
 
                 let section = ChunkSection0 {
                     // SAFETY: This is fine because we know dst (p) was properly allocated and there are no references to it.
