@@ -1,5 +1,5 @@
 use std::{
-    mem::{ManuallyDrop, MaybeUninit, transmute},
+    mem::{ManuallyDrop, MaybeUninit},
 };
 
 use miners::encoding::{Decode, Encode};
@@ -12,11 +12,12 @@ use crate::{
 #[inline]
 const fn get_bit_as_bool(bitmask: u16, n: u8) -> bool {
     let n = n & 0b1111;
-    let v = (bitmask & (1 << n)) >> n;
+    let v = ((bitmask & (1 << n) as u16) >> n as u16) as u8;
     // Here we check that v is 0 or 1, if it is any other value then turing it into a bool is UB
     debug_assert!(v == 0 || v == 1);
+
     // SAFETY: This is safe because we know (bitmask & (1 << n)) >> n) will always be 1 or 0
-    unsafe { transmute(n) }
+    unsafe { std::mem::transmute(n) }
 }
 
 /// A chunk column, not including heightmaps
@@ -34,34 +35,72 @@ pub struct ChunkColumn0<'a> {
 }
 
 impl<'a> ChunkColumn0<'a> {
-    /// Gets a reference to the section `i` if it exists.
-    pub fn get_section(&self, i: usize) -> Option<&ChunkSection0<'a>> {
-        if get_bit_as_bool(self.bitmask, i as u8) {
+    /// Gets a reference to the section if it exists.
+    pub fn section(&self, section: usize) -> Option<&ChunkSection0<'a>> {
+        if get_bit_as_bool(self.bitmask, section as u8) {
             // SAFETY: We know the section will be initialised because we checked the bitmask
-            Some(unsafe { self.sections[i].assume_init_ref() })
+            Some(unsafe { self.sections[section].assume_init_ref() })
         } else {
             None
         }
     }
 
-    /// Gets a mutable reference to the section `i` if it exists.
-    pub fn get_section_mut(&mut self, i: usize) -> Option<&mut ChunkSection0<'a>> {
-        if get_bit_as_bool(self.bitmask, i as u8) {
+    /// Gets a mutable reference to the section if it exists.
+    pub fn section_mut(&mut self, section: usize) -> Option<&mut ChunkSection0<'a>> {
+        if get_bit_as_bool(self.bitmask, section as u8) {
             // SAFETY: We know the section will be initialised because we checked the bitmask
-            Some(unsafe { self.sections[i].assume_init_mut() })
+            Some(unsafe { self.sections[section].assume_init_mut() })
         } else {
             None
         }
     }
 
     /// Gets the add bitmask
-    pub fn get_add(&self) -> u16 {
+    pub fn add(&self) -> u16 {
         self.add
     }
 
     /// Gets the sky light bitmask
-    pub fn get_sky_light(&self) -> u16 {
+    pub fn sky_light(&self) -> u16 {
         self.sky_light
+    }
+
+    pub fn sky_light_of_section(&self, section: usize) -> Option<&half_byte_array_mut!('a, 4096)>{
+        if let Some(s) = self.section(section) {
+            // SAFETY: This is safe because we provide the correct bitmap and section index
+            unsafe { s.sky_light(self.sky_light, section as u8) }
+        } else {
+            None
+        }
+    }
+
+    pub fn sky_light_of_section_mut(&mut self, section: usize) -> Option<&mut half_byte_array_mut!('a, 4096)>{
+        let sky_light = self.sky_light;
+        if let Some(s) = self.section_mut(section) {
+            // SAFETY: This is safe because we provide the correct bitmap and section index
+            unsafe { s.sky_light_mut(sky_light, section as u8) }
+        } else {
+            None
+        }
+    }
+
+    pub fn add_of_section(&self, section: usize) -> Option<&half_byte_array_mut!('a, 4096)>{
+        if let Some(s) = self.section(section) {
+            // SAFETY: This is safe because we provide the correct bitmap and section index
+            unsafe { s.add(self.add, section as u8) }
+        } else {
+            None
+        }
+    }
+
+    pub fn add_of_section_mut(&mut self, section: usize) -> Option<&mut half_byte_array_mut!('a, 4096)>{
+        let add = self.add;
+        if let Some(s) = self.section_mut(section) {
+            // SAFETY: This is safe because we provide the correct bitmap and section index
+            unsafe { s.add_mut(add, section as u8) }
+        } else {
+            None
+        }
     }
 }
 
@@ -213,7 +252,7 @@ impl<'a> ChunkSection0<'a> {
     /// # Safety
     /// This method is only safe if you know you provide the right bitmask and it has not been tampered with.
     /// You must also verify that `i` corresponds to this chunk section.
-    pub unsafe fn get_sky_light(&self, bitmask: u16, i: u8) -> Option<&half_byte_array_mut!('a, 4096)> {
+    pub unsafe fn sky_light(&self, bitmask: u16, i: u8) -> Option<&half_byte_array_mut!('a, 4096)> {
         if get_bit_as_bool(bitmask, i) {
             Some(self.sky_light.assume_init_ref())
         } else {
@@ -223,7 +262,7 @@ impl<'a> ChunkSection0<'a> {
 
     /// # Safety
     /// See `get_sky_light`.
-    pub unsafe fn get_sky_light_mut(&mut self, bitmask: u16, i: u8) -> Option<&mut half_byte_array_mut!('a, 4096)> {
+    pub unsafe fn sky_light_mut(&mut self, bitmask: u16, i: u8) -> Option<&mut half_byte_array_mut!('a, 4096)> {
         if get_bit_as_bool(bitmask, i) {
             Some(self.sky_light.assume_init_mut())
         } else {
@@ -233,7 +272,7 @@ impl<'a> ChunkSection0<'a> {
 
     /// # Safety
     /// See `get_sky_light`.
-    pub unsafe fn get_add(&self, bitmask: u16, i: u8) -> Option<&half_byte_array_mut!('a, 4096)> {
+    pub unsafe fn add(&self, bitmask: u16, i: u8) -> Option<&half_byte_array_mut!('a, 4096)> {
         if get_bit_as_bool(bitmask, i) {
             Some(self.add.assume_init_ref())
         } else {
@@ -243,7 +282,7 @@ impl<'a> ChunkSection0<'a> {
     
     /// # Safety
     /// See `get_sky_light`.
-    pub unsafe fn get_add_mut(&mut self, bitmask: u16, i: u8) -> Option<&mut half_byte_array_mut!('a, 4096)> {
+    pub unsafe fn add_mut(&mut self, bitmask: u16, i: u8) -> Option<&mut half_byte_array_mut!('a, 4096)> {
         if get_bit_as_bool(bitmask, i) {
             Some(self.add.assume_init_mut())
         } else {
