@@ -100,7 +100,7 @@ macro_rules! half_byte_array {
         $crate::containers::__private::HalfByteArray::$f
     };
     ($l:lifetime, $len:literal) => {
-        $crate::containers::__private::HalfByteArray<$l, {$len}, {$len/2}>
+        $crate::containers::__private::HalfByteArray<$l, {$len}, {$len/2+$len%2}>
     };
 }
 
@@ -110,7 +110,7 @@ macro_rules! half_byte_array_mut {
         $crate::containers::__private::HalfByteArrayMut::$f
     };
     ($l:lifetime, $len:literal) => {
-        $crate::containers::__private::HalfByteArrayMut<$l, {$len}, {$len/2}>
+        $crate::containers::__private::HalfByteArrayMut<$l, {$len}, {$len/2+$len%2}>
     };
 }
 
