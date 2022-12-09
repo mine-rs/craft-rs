@@ -1,4 +1,4 @@
-use std::mem::{ManuallyDrop, MaybeUninit};
+use std::{mem::{ManuallyDrop, MaybeUninit}};
 
 use miners::encoding::{Decode, Encode};
 
@@ -12,10 +12,10 @@ const fn get_bit_as_bool(bitmask: u16, n: u8) -> bool {
     let n = n & 0b1111;
     let v = ((bitmask & (1 << n) as u16) >> n as u16) as u8;
     // Here we check that v is 0 or 1, if it is any other value then turing it into a bool is UB
-    debug_assert!(v == 0 || v == 1);
+    // should be changed to debug assert at some point
+    assert!(v == 0 || v == 1);
 
-    // SAFETY: This is safe because we know (bitmask & (1 << n)) >> n) will always be 1 or 0
-    unsafe { std::mem::transmute(n) }
+    v!=0
 }
 
 /// A chunk column, not including heightmaps
