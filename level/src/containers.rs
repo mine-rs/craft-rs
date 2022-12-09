@@ -7,70 +7,62 @@ pub mod palette;
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct ByteArray<'a, const N: usize>(&'a [u8; N]);
+pub struct ByteArray<const N: usize>([u8; N]);
 
-impl<'a, const N: usize> Into<&'a [u8; N]> for ByteArray<'a, N> {
-    fn into(self) -> &'a [u8; N] {
-        self.0
+impl<'a, const N: usize> From<&'a [u8; N]> for &'a ByteArray<N> {
+    fn from(value: &'a [u8; N]) -> Self {
+        // SAFETY: This is fine because ByteArray is repr(transparent)
+        unsafe { transmute(value) }
     }
 }
 
-impl<const N: usize> Encode for ByteArray<'_, N> {
+impl<'a, const N: usize> From<&'a ByteArray<N>> for &'a [u8; N] {
+    fn from(value: &'a ByteArray<N>) -> Self {
+        // SAFETY: This is fine because ByteArray is repr(transparent)
+        unsafe { transmute(value) }
+    }
+}
+
+impl<'a, const N: usize> From<&'a mut [u8; N]> for &'a mut ByteArray<N> {
+    fn from(value: &'a mut [u8; N]) -> Self {
+        // SAFETY: This is fine because ByteArray is repr(transparent)
+        unsafe { transmute(value) }
+    }
+}
+
+impl<'a, const N: usize> From<&'a mut ByteArray<N>> for &'a mut [u8; N] {
+    fn from(value: &'a mut ByteArray<N>) -> Self {
+        // SAFETY: This is fine because ByteArray is repr(transparent)
+        unsafe { transmute(value) }
+    }
+}
+
+
+impl<const N: usize> Encode for ByteArray<N> {
     fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
         writer.write_all(self.0.as_ref()).map_err(From::from)
     }
 }
 
-impl<'dec, const N: usize> Decode<'dec> for ByteArray<'_, N> {
+impl<'dec, const N: usize> Decode<'dec> for &ByteArray<N> {
     fn decode(cursor: &mut std::io::Cursor<&'dec [u8]>) -> miners::encoding::decode::Result<Self> {
         let slice = decode_slice::<N>(cursor)?;
         // SAFETY: This is safe because we created the ptr from a slice that we know has a len of RLEN
-        let data: &[u8; N] = unsafe { (slice.as_ptr().cast() as *const [u8; N]).as_ref().unwrap() };
+        let data: &[u8; N] = unsafe { &*(slice.as_ptr().cast() as *const [u8; N]) };
         //let this = unsafe { Box::new(data) };
-        Ok(Self(data))
+        Ok(Self::from(data))
     }
 }
 
 // SAFETY: This is fine because we uphold all of the invariants
-unsafe impl<const N: usize> ReadContainer<N, u8> for ByteArray<'_, N> {
+unsafe impl<const N: usize> ReadContainer<N, u8> for ByteArray<N> {
     unsafe fn get_unchecked(&self, i: usize) -> u8 {
         *self.0.get_unchecked(i)
     }
 }
 
-#[repr(transparent)]
-pub struct ByteArrayMut<'a, const N: usize>(&'a mut [u8; N]);
-
-impl<'a, const N: usize> From<&'a mut [u8; N]> for ByteArrayMut<'a, N> {
-    fn from(value: &'a mut [u8; N]) -> Self {
-        Self(value)
-    }
-}
-
-impl<'a, const N: usize> Deref for ByteArrayMut<'a, N> {
-    type Target = ByteArray<'a, N>;
-
-    fn deref(&self) -> &Self::Target {
-        // SAFETY: This is fine because the types have the same layout
-        unsafe { transmute(self) }
-    }
-}
-
-impl<const N: usize> Encode for ByteArrayMut<'_, N> {
-    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
-        self.0.encode(writer)
-    }
-}
-
 // SAFETY: This is fine because we uphold all of the invariants
-unsafe impl<const N: usize> ReadContainer<N, u8> for ByteArrayMut<'_, N> {
-    unsafe fn get_unchecked(&self, i: usize) -> u8 {
-        self.deref().get_unchecked(i)
-    }
-}
-
-// SAFETY: This is fine because we uphold all of the invariants
-unsafe impl<const N: usize> WriteContainer<N, u8> for ByteArrayMut<'_, N> {
+unsafe impl<const N: usize> WriteContainer<N, u8> for ByteArray<N> {
     unsafe fn set_unchecked(&mut self, i: usize, v: u8) {
         *self.0.get_unchecked_mut(i) = v
     }
@@ -99,65 +91,70 @@ macro_rules! half_byte_array {
     ($f:ident) => {
         $crate::containers::__private::HalfByteArray::$f
     };
-    ($l:lifetime, $len:literal) => {
-        $crate::containers::__private::HalfByteArray<$l, {$len}, {$len/2+$len%2}>
-    };
-}
-
-#[macro_export]
-macro_rules! half_byte_array_mut {
-    ($f:ident) => {
-        $crate::containers::__private::HalfByteArrayMut::$f
-    };
-    ($l:lifetime, $len:literal) => {
-        $crate::containers::__private::HalfByteArrayMut<$l, {$len}, {$len/2+$len%2}>
+    ($len:literal) => {
+        $crate::containers::__private::HalfByteArray<{$len}, {$len/2+$len%2}>
     };
 }
 
 pub mod __private {
-    use std::{mem::transmute, ops::Deref};
-
     use miners::encoding::{Decode, Encode};
 
     use super::{ReadContainer, WriteContainer};
 
     #[derive(Clone, Copy)]
     #[repr(transparent)]
-    pub struct HalfByteArray<'a, const LEN: usize, const RLEN: usize>(&'a [u8; RLEN]);
+    pub struct HalfByteArray<const LEN: usize, const RLEN: usize>([u8; RLEN]);
 
-    impl<'a, const LEN: usize, const RLEN: usize> Into<&'a [u8; RLEN]>
-        for HalfByteArray<'a, LEN, RLEN>
-    {
-        fn into(self) -> &'a [u8; RLEN] {
-            self.0
+    impl<'a, const LEN: usize, const RLEN: usize> From<&'a [u8; RLEN]> for &'a HalfByteArray<LEN, RLEN> {
+        fn from(value: &'a [u8; RLEN]) -> Self {
+            // SAFETY: This is fine because ByteArray is repr(transparent)
+            unsafe { std::mem::transmute(value) }
+        }
+    }
+    
+    impl<'a, const LEN: usize, const RLEN: usize> From<&'a HalfByteArray<LEN, RLEN>> for &'a [u8; RLEN] {
+        fn from(value: &'a HalfByteArray<LEN, RLEN>) -> Self {
+            // SAFETY: This is fine because ByteArray is repr(transparent)
+            unsafe { std::mem::transmute(value) }
+        }
+    }
+    
+    impl<'a, const LEN: usize, const RLEN: usize> From<&'a mut [u8; RLEN]> for &'a mut HalfByteArray<LEN, RLEN> {
+        fn from(value: &'a mut [u8; RLEN]) -> Self {
+            // SAFETY: This is fine because ByteArray is repr(transparent)
+            unsafe { std::mem::transmute(value) }
+        }
+    }
+    
+    impl<'a, const LEN: usize, const RLEN: usize> From<&'a mut HalfByteArray<LEN, RLEN>> for &'a mut [u8; RLEN] {
+        fn from(value: &'a mut HalfByteArray<LEN, RLEN>) -> Self {
+            // SAFETY: This is fine because ByteArray is repr(transparent)
+            unsafe { std::mem::transmute(value) }
         }
     }
 
-    impl<const LEN: usize, const RLEN: usize> Encode for HalfByteArray<'_, LEN, RLEN> {
+    impl<const LEN: usize, const RLEN: usize> Encode for HalfByteArray<LEN, RLEN> {
         fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
             writer.write_all(self.0.as_ref()).map_err(From::from)
         }
     }
 
-    impl<'dec, const LEN: usize, const RLEN: usize> Decode<'dec> for HalfByteArray<'_, LEN, RLEN> {
+    impl<'dec, const LEN: usize, const RLEN: usize> Decode<'dec> for &'dec HalfByteArray<LEN, RLEN> {
         fn decode(
             cursor: &mut std::io::Cursor<&'dec [u8]>,
         ) -> miners::encoding::decode::Result<Self> {
             let slice = super::decode_slice::<RLEN>(cursor)?;
             // SAFETY: This is safe because we created the ptr from a slice that we know has a len of RLEN
             let data: &[u8; RLEN] = unsafe {
-                (slice.as_ptr().cast() as *const [u8; RLEN])
-                    .as_ref()
-                    .unwrap()
+                &*(slice.as_ptr().cast() as *const [u8; RLEN])
             };
-            //let this = unsafe { Box::new(data) };
-            Ok(Self(data))
+            Ok(Self::from(data))
         }
     }
 
     // SAFETY: This is fine because we uphold all of the invariants
     unsafe impl<const LEN: usize, const RLEN: usize> ReadContainer<{ LEN }, u8>
-        for HalfByteArray<'_, LEN, RLEN>
+        for HalfByteArray<LEN, RLEN>
     {
         fn get(&self, i: usize) -> u8 {
             if i >= RLEN / 2 + RLEN % 2 {
@@ -177,42 +174,9 @@ pub mod __private {
         }
     }
 
-    #[repr(transparent)]
-    pub struct HalfByteArrayMut<'a, const LEN: usize, const RLEN: usize>(&'a mut [u8; RLEN]);
-
-    impl<'a, const LEN: usize, const RLEN: usize> From<&'a mut [u8; RLEN]>
-        for HalfByteArrayMut<'a, LEN, RLEN>
-    {
-        fn from(value: &'a mut [u8; RLEN]) -> Self {
-            Self(value)
-        }
-    }
-
-    // SAFETY: This is fine because we uphold all of the invariants
-    unsafe impl<const LEN: usize, const RLEN: usize> ReadContainer<{ LEN }, u8>
-        for HalfByteArrayMut<'_, LEN, RLEN>
-    {
-        fn get(&self, i: usize) -> u8 {
-            self.deref().get(i)
-        }
-
-        unsafe fn get_unchecked(&self, i: usize) -> u8 {
-            self.deref().get_unchecked(i)
-        }
-    }
-
-    impl<'a, const LEN: usize, const RLEN: usize> Deref for HalfByteArrayMut<'a, LEN, RLEN> {
-        type Target = HalfByteArray<'a, LEN, RLEN>;
-
-        fn deref(&self) -> &Self::Target {
-            // SAFETY: This is fine because the types have the exact same layout
-            unsafe { transmute(self) }
-        }
-    }
-
     // SAFETY: This is fine because we uphold all of the invariants
     unsafe impl<const LEN: usize, const RLEN: usize> WriteContainer<{ LEN }, u8>
-        for HalfByteArrayMut<'_, LEN, RLEN>
+        for HalfByteArray<LEN, RLEN>
     {
         fn set(&mut self, i: usize, v: u8) {
             if i >= RLEN / 2 + RLEN % 2 {
