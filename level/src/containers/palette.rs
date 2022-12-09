@@ -148,6 +148,7 @@ enum BiomePalette<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> 
     },
 }
 
+// SAFETY: This is fine because we uphold all of the invariants
 unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> PaletteContainer<N>
     for BiomePaletteContainer<N, B>
 {
@@ -360,6 +361,7 @@ macro_rules! impl_encoding_for_state_endian {
 impl_encoding_for_state_endian!(BigEndian);
 impl_encoding_for_state_endian!(NativeEndian);
 
+// SAFETY: This is fine because we uphold all of the invariants
 unsafe impl<const N: usize, B: super::bitpack::byteorder::ByteOrderedU64> PaletteContainer<N>
     for StatePaletteContainer<N, B>
 {

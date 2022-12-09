@@ -31,6 +31,7 @@ impl<'dec, const N: usize> Decode<'dec> for ByteArray<'_, N> {
     }
 }
 
+// SAFETY: This is fine because we uphold all of the invariants
 unsafe impl<const N: usize> ReadContainer<N, u8> for ByteArray<'_, N> {
     unsafe fn get_unchecked(&self, i: usize) -> u8 {
         *self.0.get_unchecked(i)
@@ -61,12 +62,14 @@ impl<const N: usize> Encode for ByteArrayMut<'_, N> {
     }
 }
 
+// SAFETY: This is fine because we uphold all of the invariants
 unsafe impl<const N: usize> ReadContainer<N, u8> for ByteArrayMut<'_, N> {
     unsafe fn get_unchecked(&self, i: usize) -> u8 {
         self.deref().get_unchecked(i)
     }
 }
 
+// SAFETY: This is fine because we uphold all of the invariants
 unsafe impl<const N: usize> WriteContainer<N, u8> for ByteArrayMut<'_, N> {
     unsafe fn set_unchecked(&mut self, i: usize, v: u8) {
         *self.0.get_unchecked_mut(i) = v
@@ -142,15 +145,28 @@ pub mod __private {
         ) -> miners::encoding::decode::Result<Self> {
             let slice = super::decode_slice::<RLEN>(cursor)?;
             // SAFETY: This is safe because we created the ptr from a slice that we know has a len of RLEN
-            let data: &[u8; RLEN] = unsafe { (slice.as_ptr().cast() as *const [u8; RLEN]).as_ref().unwrap() };
+            let data: &[u8; RLEN] = unsafe {
+                (slice.as_ptr().cast() as *const [u8; RLEN])
+                    .as_ref()
+                    .unwrap()
+            };
             //let this = unsafe { Box::new(data) };
             Ok(Self(data))
         }
     }
 
+    // SAFETY: This is fine because we uphold all of the invariants
     unsafe impl<const LEN: usize, const RLEN: usize> ReadContainer<{ LEN }, u8>
         for HalfByteArray<'_, LEN, RLEN>
     {
+        fn get(&self, i: usize) -> u8 {
+            if i >= RLEN / 2 + RLEN % 2 {
+                panic!("out of bounds")
+            }
+            // SAFETY: This is fine because we just checked the bounds
+            unsafe { self.get_unchecked(i) }
+        }
+
         unsafe fn get_unchecked(&self, i: usize) -> u8 {
             let byte = *self.0.get_unchecked(i / 2);
             if i % 2 == 0 {
@@ -164,15 +180,22 @@ pub mod __private {
     #[repr(transparent)]
     pub struct HalfByteArrayMut<'a, const LEN: usize, const RLEN: usize>(&'a mut [u8; RLEN]);
 
-    impl<'a, const LEN: usize, const RLEN: usize> From<&'a mut [u8; RLEN]> for HalfByteArrayMut<'a, LEN, RLEN> {
+    impl<'a, const LEN: usize, const RLEN: usize> From<&'a mut [u8; RLEN]>
+        for HalfByteArrayMut<'a, LEN, RLEN>
+    {
         fn from(value: &'a mut [u8; RLEN]) -> Self {
             Self(value)
         }
     }
 
+    // SAFETY: This is fine because we uphold all of the invariants
     unsafe impl<const LEN: usize, const RLEN: usize> ReadContainer<{ LEN }, u8>
         for HalfByteArrayMut<'_, LEN, RLEN>
     {
+        fn get(&self, i: usize) -> u8 {
+            self.deref().get(i)
+        }
+
         unsafe fn get_unchecked(&self, i: usize) -> u8 {
             self.deref().get_unchecked(i)
         }
@@ -187,9 +210,18 @@ pub mod __private {
         }
     }
 
+    // SAFETY: This is fine because we uphold all of the invariants
     unsafe impl<const LEN: usize, const RLEN: usize> WriteContainer<{ LEN }, u8>
         for HalfByteArrayMut<'_, LEN, RLEN>
     {
+        fn set(&mut self, i: usize, v: u8) {
+            if i >= RLEN / 2 + RLEN % 2 {
+                panic!("out of bounds")
+            }
+            // SAFETY: This is fine because we just checked the bounds
+            unsafe { self.set_unchecked(i, v) }
+        }
+
         unsafe fn set_unchecked(&mut self, i: usize, v: u8) {
             let byte = self.0.get_unchecked_mut(i / 2);
             if i % 2 == 0 {
@@ -245,12 +277,14 @@ pub unsafe trait WriteContainer<const N: usize, V>: ReadContainer<N, V> {
     }
 }
 
+// SAFETY: This is safe because implementing PaletteContainer has the same invariants as ReadContainer/WriteContainer
 unsafe impl<const N: usize, T: palette::PaletteContainer<N>> ReadContainer<N, u16> for T {
     unsafe fn get_unchecked(&self, i: usize) -> u16 {
         self.get_unchecked(i)
     }
 }
 
+// SAFETY: This is safe because implementing PaletteContainer has the same invariants as ReadContainer/WriteContainer
 unsafe impl<const N: usize, T: palette::PaletteContainer<N>> WriteContainer<N, u16> for T {
     unsafe fn set_unchecked(&mut self, i: usize, v: u16) {
         self.set_unchecked(i, v)

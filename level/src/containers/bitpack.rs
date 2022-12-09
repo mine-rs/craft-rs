@@ -248,6 +248,8 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
     }
 
     #[inline]
+    /// # Safety
+    /// This is sound as long as `i` is within bounds.
     pub unsafe fn swap_unchecked(&mut self, i: usize, v: u32) -> u32 {
         let val = self.get_unchecked(i);
         self.set_unchecked(i, v);
@@ -264,7 +266,7 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
     }
 
     fn calculate_mask(bits: usize) -> u64 {
-        ((((1 as u64) << bits) - 1) as u64).rotate_right(bits as u32)
+        ((((1_u64) << bits) - 1) as u64).rotate_right(bits as u32)
     }
 
     pub fn rlen(&self) -> usize {
