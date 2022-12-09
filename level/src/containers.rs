@@ -1,4 +1,4 @@
-use std::{mem::transmute, ops::Deref};
+use std::mem::transmute;
 
 use miners::encoding::{Decode, Encode};
 
