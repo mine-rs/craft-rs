@@ -21,10 +21,9 @@ pub struct ChunkColumn0<'a> {
     buf: *mut u8,
     size: usize,
     bitmask: u16,
-    add: u16,
-    sky_light: u16,
     sections: [MaybeUninit<ChunkSection0<'a>>; 16],
 }
+
 
 impl<'a> ChunkColumn0<'a> {
     /// Gets a reference to the section if it exists.
@@ -46,61 +45,8 @@ impl<'a> ChunkColumn0<'a> {
             None
         }
     }
-
-    /// Gets the add bitmask
-    pub fn add(&self) -> u16 {
-        self.add
-    }
-
-    /// Gets the sky light bitmask
-    pub fn sky_light(&self) -> u16 {
-        self.sky_light
-    }
-
-    pub fn sky_light_of_section(&self, section: usize) -> Option<&HalfByteArray<2048>> {
-        if let Some(s) = self.section(section) {
-            // SAFETY: This is safe because we provide the correct bitmap and section index
-            unsafe { s.sky_light(self.sky_light, section as u8) }
-        } else {
-            None
-        }
-    }
-
-    pub fn sky_light_of_section_mut(
-        &mut self,
-        section: usize,
-    ) -> Option<&mut HalfByteArray<2048>> {
-        let sky_light = self.sky_light;
-        if let Some(s) = self.section_mut(section) {
-            // SAFETY: This is safe because we provide the correct bitmap and section index
-            unsafe { s.sky_light_mut(sky_light, section as u8) }
-        } else {
-            None
-        }
-    }
-
-    pub fn add_of_section(&self, section: usize) -> Option<&HalfByteArray<2048>> {
-        if let Some(s) = self.section(section) {
-            // SAFETY: This is safe because we provide the correct bitmap and section index
-            unsafe { s.add(self.add, section as u8) }
-        } else {
-            None
-        }
-    }
-
-    pub fn add_of_section_mut(
-        &mut self,
-        section: usize,
-    ) -> Option<&mut HalfByteArray<2048>> {
-        let add = self.add;
-        if let Some(s) = self.section_mut(section) {
-            // SAFETY: This is safe because we provide the correct bitmap and section index
-            unsafe { s.add_mut(add, section as u8) }
-        } else {
-            None
-        }
-    }
 }
+
 
 impl<'a> Drop for ChunkColumn0<'a> {
     fn drop(&mut self) {
@@ -200,7 +146,7 @@ impl ChunkColumn0<'_> {
                         )).into()
                     },
                     sky_light: if sky_light {
-                        MaybeUninit::new(
+                        Some(
                             // SAFETY: See safety comment for `blocks`
                             unsafe {
                                 (new_field(
@@ -208,26 +154,25 @@ impl ChunkColumn0<'_> {
                                     sections[i as usize]
                                         .decode
                                         .assume_init()
-                                        .sky_light
-                                        .assume_init(),
+                                        .sky_light.unwrap_unchecked(),
                                 )).into()
                             },
                         )
                     } else {
-                        MaybeUninit::uninit()
+                        None
                     },
                     add: if add {
-                        MaybeUninit::new(
+                        Some(
                             // SAFETY: See safety comment for `blocks`
                             unsafe {
                                 (new_field(
                                     &mut p,
-                                    sections[i as usize].decode.assume_init().add.assume_init(),
+                                    sections[i as usize].decode.assume_init().add.unwrap_unchecked(),
                                 )).into()
                             },
                         )
                     } else {
-                        MaybeUninit::uninit()
+                        None
                     },
                     // SAFETY: See safety comment for `blocks`
                     biomes: unsafe {
@@ -247,8 +192,6 @@ impl ChunkColumn0<'_> {
             buf: data,
             size,
             bitmask,
-            add,
-            sky_light,
             // SAFETY: This is fine because we know both union fields have the exact same layout.
             sections: unsafe { std::mem::transmute(sections) },
         })
@@ -260,60 +203,9 @@ pub struct ChunkSection0<'a> {
     pub blocks: &'a mut ByteArray<4096>,
     pub metadata: &'a mut HalfByteArray<2048>,
     pub light: &'a mut HalfByteArray<2048>,
-    pub sky_light: MaybeUninit<&'a mut HalfByteArray<2048>>,
-    pub add: MaybeUninit<&'a mut HalfByteArray<2048>>,
+    pub sky_light: Option<&'a mut HalfByteArray<2048>>,
+    pub add: Option<&'a mut HalfByteArray<2048>>,
     pub biomes: &'a mut HalfByteArray<2048>,
-}
-
-impl<'a> ChunkSection0<'a> {
-    /// # Safety
-    /// This method is only safe if you know you provide the right bitmask and it has not been tampered with.
-    /// You must also verify that `i` corresponds to this chunk section.
-    pub unsafe fn sky_light(&self, bitmask: u16, i: u8) -> Option<&HalfByteArray<2048>> {
-        if bit_at(bitmask, i) {
-            Some(self.sky_light.assume_init_ref())
-        } else {
-            None
-        }
-    }
-
-    /// # Safety
-    /// See `get_sky_light`.
-    pub unsafe fn sky_light_mut(
-        &mut self,
-        bitmask: u16,
-        i: u8,
-    ) -> Option<&mut HalfByteArray<2048>> {
-        if bit_at(bitmask, i) {
-            Some(self.sky_light.assume_init_mut())
-        } else {
-            None
-        }
-    }
-
-    /// # Safety
-    /// See `get_sky_light`.
-    pub unsafe fn add(&self, bitmask: u16, i: u8) -> Option<&HalfByteArray<2048>> {
-        if bit_at(bitmask, i) {
-            Some(self.add.assume_init_ref())
-        } else {
-            None
-        }
-    }
-
-    /// # Safety
-    /// See `get_sky_light`.
-    pub unsafe fn add_mut(
-        &mut self,
-        bitmask: u16,
-        i: u8,
-    ) -> Option<&mut HalfByteArray<2048>> {
-        if bit_at(bitmask, i) {
-            Some(self.add.assume_init_mut())
-        } else {
-            None
-        }
-    }
 }
 
 /// This is only used internally for Decoding
@@ -323,8 +215,8 @@ struct ChunkSection0Decode<'a> {
     pub blocks: &'a ByteArray<4096>,
     pub metadata: &'a HalfByteArray<2048>,
     pub light: &'a HalfByteArray<2048>,
-    pub sky_light: MaybeUninit<&'a HalfByteArray<2048>>,
-    pub add: MaybeUninit<&'a HalfByteArray<2048>>,
+    pub sky_light: Option<&'a HalfByteArray<2048>>,
+    pub add: Option<&'a HalfByteArray<2048>>,
     pub biomes: &'a HalfByteArray<2048>,
 }
 
@@ -339,14 +231,14 @@ impl<'a> ChunkSection0Decode<'a> {
             metadata: <&HalfByteArray<2048>>::decode(cursor)?,
             light: <&HalfByteArray<2048>>::decode(cursor)?,
             sky_light: if sky_light {
-                MaybeUninit::new(<&HalfByteArray<2048>>::decode(cursor)?)
+                Some(<&HalfByteArray<2048>>::decode(cursor)?)
             } else {
-                MaybeUninit::uninit()
+                None
             },
             add: if add {
-                MaybeUninit::new(<&HalfByteArray<2048>>::decode(cursor)?)
+                Some(<&HalfByteArray<2048>>::decode(cursor)?)
             } else {
-                MaybeUninit::uninit()
+                None
             },
             biomes: <&HalfByteArray<2048>>::decode(cursor)?,
         })
