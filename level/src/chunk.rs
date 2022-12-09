@@ -57,7 +57,7 @@ impl<'a> ChunkColumn0<'a> {
         self.sky_light
     }
 
-    pub fn sky_light_of_section(&self, section: usize) -> Option<&HalfByteArray<4096>> {
+    pub fn sky_light_of_section(&self, section: usize) -> Option<&HalfByteArray<2048>> {
         if let Some(s) = self.section(section) {
             // SAFETY: This is safe because we provide the correct bitmap and section index
             unsafe { s.sky_light(self.sky_light, section as u8) }
@@ -69,7 +69,7 @@ impl<'a> ChunkColumn0<'a> {
     pub fn sky_light_of_section_mut(
         &mut self,
         section: usize,
-    ) -> Option<&mut HalfByteArray<4096>> {
+    ) -> Option<&mut HalfByteArray<2048>> {
         let sky_light = self.sky_light;
         if let Some(s) = self.section_mut(section) {
             // SAFETY: This is safe because we provide the correct bitmap and section index
@@ -79,7 +79,7 @@ impl<'a> ChunkColumn0<'a> {
         }
     }
 
-    pub fn add_of_section(&self, section: usize) -> Option<&HalfByteArray<4096>> {
+    pub fn add_of_section(&self, section: usize) -> Option<&HalfByteArray<2048>> {
         if let Some(s) = self.section(section) {
             // SAFETY: This is safe because we provide the correct bitmap and section index
             unsafe { s.add(self.add, section as u8) }
@@ -91,7 +91,7 @@ impl<'a> ChunkColumn0<'a> {
     pub fn add_of_section_mut(
         &mut self,
         section: usize,
-    ) -> Option<&mut HalfByteArray<4096>> {
+    ) -> Option<&mut HalfByteArray<2048>> {
         let add = self.add;
         if let Some(s) = self.section_mut(section) {
             // SAFETY: This is safe because we provide the correct bitmap and section index
@@ -258,18 +258,18 @@ impl ChunkColumn0<'_> {
 #[repr(C)]
 pub struct ChunkSection0<'a> {
     pub blocks: &'a mut ByteArray<4096>,
-    pub metadata: &'a mut HalfByteArray<4096>,
-    pub light: &'a mut HalfByteArray<4096>,
-    pub sky_light: MaybeUninit<&'a mut HalfByteArray<4096>>,
-    pub add: MaybeUninit<&'a mut HalfByteArray<4096>>,
-    pub biomes: &'a mut HalfByteArray<4096>,
+    pub metadata: &'a mut HalfByteArray<2048>,
+    pub light: &'a mut HalfByteArray<2048>,
+    pub sky_light: MaybeUninit<&'a mut HalfByteArray<2048>>,
+    pub add: MaybeUninit<&'a mut HalfByteArray<2048>>,
+    pub biomes: &'a mut HalfByteArray<2048>,
 }
 
 impl<'a> ChunkSection0<'a> {
     /// # Safety
     /// This method is only safe if you know you provide the right bitmask and it has not been tampered with.
     /// You must also verify that `i` corresponds to this chunk section.
-    pub unsafe fn sky_light(&self, bitmask: u16, i: u8) -> Option<&HalfByteArray<4096>> {
+    pub unsafe fn sky_light(&self, bitmask: u16, i: u8) -> Option<&HalfByteArray<2048>> {
         if bit_at(bitmask, i) {
             Some(self.sky_light.assume_init_ref())
         } else {
@@ -283,7 +283,7 @@ impl<'a> ChunkSection0<'a> {
         &mut self,
         bitmask: u16,
         i: u8,
-    ) -> Option<&mut HalfByteArray<4096>> {
+    ) -> Option<&mut HalfByteArray<2048>> {
         if bit_at(bitmask, i) {
             Some(self.sky_light.assume_init_mut())
         } else {
@@ -293,7 +293,7 @@ impl<'a> ChunkSection0<'a> {
 
     /// # Safety
     /// See `get_sky_light`.
-    pub unsafe fn add(&self, bitmask: u16, i: u8) -> Option<&HalfByteArray<4096>> {
+    pub unsafe fn add(&self, bitmask: u16, i: u8) -> Option<&HalfByteArray<2048>> {
         if bit_at(bitmask, i) {
             Some(self.add.assume_init_ref())
         } else {
@@ -307,7 +307,7 @@ impl<'a> ChunkSection0<'a> {
         &mut self,
         bitmask: u16,
         i: u8,
-    ) -> Option<&mut HalfByteArray<4096>> {
+    ) -> Option<&mut HalfByteArray<2048>> {
         if bit_at(bitmask, i) {
             Some(self.add.assume_init_mut())
         } else {
@@ -321,11 +321,11 @@ impl<'a> ChunkSection0<'a> {
 #[repr(C)]
 struct ChunkSection0Decode<'a> {
     pub blocks: &'a ByteArray<4096>,
-    pub metadata: &'a HalfByteArray<4096>,
-    pub light: &'a HalfByteArray<4096>,
-    pub sky_light: MaybeUninit<&'a HalfByteArray<4096>>,
-    pub add: MaybeUninit<&'a HalfByteArray<4096>>,
-    pub biomes: &'a HalfByteArray<4096>,
+    pub metadata: &'a HalfByteArray<2048>,
+    pub light: &'a HalfByteArray<2048>,
+    pub sky_light: MaybeUninit<&'a HalfByteArray<2048>>,
+    pub add: MaybeUninit<&'a HalfByteArray<2048>>,
+    pub biomes: &'a HalfByteArray<2048>,
 }
 
 impl<'a> ChunkSection0Decode<'a> {
@@ -336,19 +336,19 @@ impl<'a> ChunkSection0Decode<'a> {
     ) -> miners::encoding::decode::Result<Self> {
         Ok(Self {
             blocks: <&ByteArray<4096>>::decode(cursor)?,
-            metadata: <&HalfByteArray<4096>>::decode(cursor)?,
-            light: <&HalfByteArray<4096>>::decode(cursor)?,
+            metadata: <&HalfByteArray<2048>>::decode(cursor)?,
+            light: <&HalfByteArray<2048>>::decode(cursor)?,
             sky_light: if sky_light {
-                MaybeUninit::new(<&HalfByteArray<4096>>::decode(cursor)?)
+                MaybeUninit::new(<&HalfByteArray<2048>>::decode(cursor)?)
             } else {
                 MaybeUninit::uninit()
             },
             add: if add {
-                MaybeUninit::new(<&HalfByteArray<4096>>::decode(cursor)?)
+                MaybeUninit::new(<&HalfByteArray<2048>>::decode(cursor)?)
             } else {
                 MaybeUninit::uninit()
             },
-            biomes: <&HalfByteArray<4096>>::decode(cursor)?,
+            biomes: <&HalfByteArray<2048>>::decode(cursor)?,
         })
     }
 }
