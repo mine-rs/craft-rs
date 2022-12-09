@@ -20,17 +20,15 @@ pub struct ChunkColumn<const N: usize, S> {
 pub struct ChunkColumn0<'a> {
     buf: *mut u8,
     size: usize,
-    bitmask: u16,
-    sections: [MaybeUninit<ChunkSection0<'a>>; 16],
+    sections: [Option<ChunkSection0<'a>>; 16],
 }
 
 
 impl<'a> ChunkColumn0<'a> {
     /// Gets a reference to the section if it exists.
     pub fn section(&self, section: usize) -> Option<&ChunkSection0<'a>> {
-        if bit_at(self.bitmask, section as u8) {
-            // SAFETY: We know the section will be initialised because we checked the bitmask
-            Some(unsafe { self.sections[section].assume_init_ref() })
+        if let Some(ref section) =  self.sections[section] {
+            Some(section)
         } else {
             None
         }
@@ -38,9 +36,8 @@ impl<'a> ChunkColumn0<'a> {
 
     /// Gets a mutable reference to the section if it exists.
     pub fn section_mut(&mut self, section: usize) -> Option<&mut ChunkSection0<'a>> {
-        if bit_at(self.bitmask, section as u8) {
-            // SAFETY: We know the section will be initialised because we checked the bitmask
-            Some(unsafe { self.sections[section].assume_init_mut() })
+        if let Some(ref mut section) =  self.sections[section] {
+            Some(section)
         } else {
             None
         }
@@ -63,9 +60,9 @@ impl ChunkColumn0<'_> {
         sky_light: u16,
     ) -> miners::encoding::decode::Result<Self> {
         union ChunkSection<'a> {
-            decode: MaybeUninit<ChunkSection0Decode<'a>>,
+            decode: MaybeUninit<Option<ChunkSection0Decode<'a>>>,
             // wrap it in ManuallyDrop even though it does not need dropping because it can't implement `Copy`
-            mutable: ManuallyDrop<ChunkSection0<'a>>,
+            mutable: ManuallyDrop<Option<ChunkSection0<'a>>>,
         }
         // SAFETY: We have to do this weird thing because ChunkSection doesn't implement Copy, it is completely safe though as the union fields have the same layout
         let mut sections: [ChunkSection; 16] =
@@ -81,9 +78,9 @@ impl ChunkColumn0<'_> {
             let sky_light: bool = bit_at(sky_light, i);
             if exists {
                 sections[i as usize] = ChunkSection {
-                    decode: MaybeUninit::new(ChunkSection0Decode::from_reader(
+                    decode: MaybeUninit::new(Some(ChunkSection0Decode::from_reader(
                         cursor, sky_light, add,
-                    )?),
+                    )?)),
                 };
                 if add {
                     nadd += 1;
@@ -92,6 +89,10 @@ impl ChunkColumn0<'_> {
                     nsky_light += 1
                 }
                 nsections += 1;
+            } else {
+                sections[i as usize] = ChunkSection {
+                    mutable: ManuallyDrop::new(None)
+                }
             }
         }
         const MINIMUM_SECTION_SIZE: usize = 4096 + (3 * 2048);
@@ -128,21 +129,21 @@ impl ChunkColumn0<'_> {
                     blocks: unsafe {
                         (new_field(
                             &mut p,
-                            sections[i as usize].decode.assume_init().blocks,
+                            sections[i as usize].decode.assume_init().unwrap_unchecked().blocks,
                         )).into()
                     },
                     // SAFETY: See safety comment for `blocks`
                     metadata: unsafe {
                         (new_field(
                             &mut p,
-                            sections[i as usize].decode.assume_init().metadata,
+                            sections[i as usize].decode.assume_init().unwrap_unchecked().metadata,
                         )).into()
                     },
                     // SAFETY: See safety comment for `blocks`
                     light: unsafe {
                         (new_field(
                             &mut p,
-                            sections[i as usize].decode.assume_init().light,
+                            sections[i as usize].decode.assume_init().unwrap_unchecked().light,
                         )).into()
                     },
                     sky_light: if sky_light {
@@ -153,7 +154,7 @@ impl ChunkColumn0<'_> {
                                     &mut p,
                                     sections[i as usize]
                                         .decode
-                                        .assume_init()
+                                        .assume_init().unwrap_unchecked()
                                         .sky_light.unwrap_unchecked(),
                                 )).into()
                             },
@@ -167,7 +168,7 @@ impl ChunkColumn0<'_> {
                             unsafe {
                                 (new_field(
                                     &mut p,
-                                    sections[i as usize].decode.assume_init().add.unwrap_unchecked(),
+                                    sections[i as usize].decode.assume_init().unwrap_unchecked().add.unwrap_unchecked(),
                                 )).into()
                             },
                         )
@@ -178,12 +179,12 @@ impl ChunkColumn0<'_> {
                     biomes: unsafe {
                         (new_field(
                             &mut p,
-                            sections[i as usize].decode.assume_init().biomes,
+                            sections[i as usize].decode.assume_init().unwrap_unchecked().biomes,
                         )).into()
                     },
                 };
                 sections[i as usize] = ChunkSection {
-                    mutable: ManuallyDrop::new(section),
+                    mutable: ManuallyDrop::new(Some(section)),
                 };
             }
         }
@@ -191,7 +192,6 @@ impl ChunkColumn0<'_> {
         Ok(Self {
             buf: data,
             size,
-            bitmask,
             // SAFETY: This is fine because we know both union fields have the exact same layout.
             sections: unsafe { std::mem::transmute(sections) },
         })
