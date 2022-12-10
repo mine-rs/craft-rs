@@ -37,7 +37,6 @@ impl<'a, const N: usize> From<&'a mut ByteArray<N>> for &'a mut [u8; N] {
     }
 }
 
-
 impl<const N: usize> Encode for ByteArray<N> {
     fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
         writer.write_all(self.0.as_ref()).map_err(From::from)
@@ -122,23 +121,17 @@ impl<const RLEN: usize> Encode for HalfByteArray<RLEN> {
 }
 
 impl<'dec, const RLEN: usize> Decode<'dec> for &'dec HalfByteArray<RLEN> {
-    fn decode(
-        cursor: &mut std::io::Cursor<&'dec [u8]>,
-    ) -> miners::encoding::decode::Result<Self> {
+    fn decode(cursor: &mut std::io::Cursor<&'dec [u8]>) -> miners::encoding::decode::Result<Self> {
         let slice = decode_slice::<RLEN>(cursor)?;
         // SAFETY: This is safe because we created the ptr from a slice that we know has a len of RLEN
-        let data: &[u8; RLEN] = unsafe {
-            &*(slice.as_ptr().cast() as *const [u8; RLEN])
-        };
+        let data: &[u8; RLEN] = unsafe { &*(slice.as_ptr().cast() as *const [u8; RLEN]) };
         Ok(Self::from(data))
     }
 }
 
 // SAFETY: This is fine because we uphold all of the invariants
-unsafe impl<const RLEN: usize> ReadContainer<u8>
-    for HalfByteArray<RLEN>
-{
-    const N: usize = RLEN*2;
+unsafe impl<const RLEN: usize> ReadContainer<u8> for HalfByteArray<RLEN> {
+    const N: usize = RLEN * 2;
 
     unsafe fn get_unchecked(&self, i: usize) -> u8 {
         let byte = *self.0.get_unchecked(i / 2);
@@ -151,9 +144,7 @@ unsafe impl<const RLEN: usize> ReadContainer<u8>
 }
 
 // SAFETY: This is fine because we uphold all of the invariants
-unsafe impl<const RLEN: usize> WriteContainer<u8>
-    for HalfByteArray<RLEN>
-{
+unsafe impl<const RLEN: usize> WriteContainer<u8> for HalfByteArray<RLEN> {
     fn set(&mut self, i: usize, v: u8) {
         if i >= RLEN / 2 + RLEN % 2 {
             panic!("out of bounds")

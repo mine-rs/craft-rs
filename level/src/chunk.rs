@@ -1,8 +1,6 @@
 use miners::encoding::{Decode, Encode};
 
-use crate::{
-    containers::{HalfByteArray, ByteArray},
-};
+use crate::containers::{ByteArray, HalfByteArray};
 
 #[inline]
 const fn bit_at(val: u16, idx: u8) -> bool {
@@ -21,11 +19,10 @@ pub struct ChunkColumn0<'a> {
     sections: [Option<ChunkSection0<'a>>; 16],
 }
 
-
 impl<'a> ChunkColumn0<'a> {
     /// Gets a reference to the section if it exists.
     pub fn section(&self, section: usize) -> Option<&ChunkSection0<'a>> {
-        if let Some(ref section) =  self.sections[section] {
+        if let Some(ref section) = self.sections[section] {
             Some(section)
         } else {
             None
@@ -34,14 +31,13 @@ impl<'a> ChunkColumn0<'a> {
 
     /// Gets a mutable reference to the section if it exists.
     pub fn section_mut(&mut self, section: usize) -> Option<&mut ChunkSection0<'a>> {
-        if let Some(ref mut section) =  self.sections[section] {
+        if let Some(ref mut section) = self.sections[section] {
             Some(section)
         } else {
             None
         }
     }
 }
-
 
 impl<'a> Drop for ChunkColumn0<'a> {
     fn drop(&mut self) {
@@ -68,10 +64,8 @@ impl<'a> ChunkColumn0<'a> {
             let add: bool = bit_at(add, i);
             let sky_light: bool = bit_at(sky_light, i);
             if exists {
-                decode_sections[i as usize] = Some(ChunkSection0Decode::from_reader(
-                        cursor, sky_light, add,
-                    )?)
-                ;
+                decode_sections[i as usize] =
+                    Some(ChunkSection0Decode::from_reader(cursor, sky_light, add)?);
                 if add {
                     nadd += 1;
                 }
@@ -88,7 +82,8 @@ impl<'a> ChunkColumn0<'a> {
         std::mem::forget(vec);
 
         // SAFETY: We have to do this weird thing because ChunkSection doesn't implement Copy, it is completely safe though as the union fields have the same layout
-        let mut sections: [Option<ChunkSection0>; 16] = unsafe { std::mem::transmute([Option::<ChunkSection0Decode>::None; 16]) };
+        let mut sections: [Option<ChunkSection0>; 16] =
+            unsafe { std::mem::transmute([Option::<ChunkSection0Decode>::None; 16]) };
         // loop through the sections
         let mut p = data;
         for i in 0u8..16 {
@@ -110,35 +105,15 @@ impl<'a> ChunkColumn0<'a> {
                 let section = ChunkSection0 {
                     // SAFETY: This is fine because we know dst (p) was properly allocated and there are no references to it.
                     // (a pointer is not a reference)
-                    blocks: unsafe {
-                        (new_field(
-                            &mut p,
-                            section.blocks,
-                        )).into()
-                    },
+                    blocks: unsafe { (new_field(&mut p, section.blocks)).into() },
                     // SAFETY: See safety comment for `blocks`
-                    metadata: unsafe {
-                        (new_field(
-                            &mut p,
-                            section.metadata,
-                        )).into()
-                    },
+                    metadata: unsafe { (new_field(&mut p, section.metadata)).into() },
                     // SAFETY: See safety comment for `blocks`
-                    light: unsafe {
-                        (new_field(
-                            &mut p,
-                            section.light,
-                        )).into()
-                    },
+                    light: unsafe { (new_field(&mut p, section.light)).into() },
                     sky_light: if let Some(v) = section.sky_light {
                         Some(
                             // SAFETY: See safety comment for `blocks`
-                            unsafe {
-                                (new_field(
-                                    &mut p,
-                                        v
-                                )).into()
-                            },
+                            unsafe { (new_field(&mut p, v)).into() },
                         )
                     } else {
                         None
@@ -146,26 +121,15 @@ impl<'a> ChunkColumn0<'a> {
                     add: if let Some(v) = section.add {
                         Some(
                             // SAFETY: See safety comment for `blocks`
-                            unsafe {
-                                (new_field(
-                                    &mut p,
-                                    v,
-                                )).into()
-                            },
+                            unsafe { (new_field(&mut p, v)).into() },
                         )
                     } else {
                         None
                     },
                     // SAFETY: See safety comment for `blocks`
-                    biomes: unsafe {
-                        (new_field(
-                            &mut p,
-                            section.biomes,
-                        )).into()
-                    },
+                    biomes: unsafe { (new_field(&mut p, section.biomes)).into() },
                 };
-                sections[i as usize] = 
-                    Some(section);
+                sections[i as usize] = Some(section);
             }
         }
         // SAFETY: This is fine because ChunkSection0 and ChunkSection0Decode have the same type layout
