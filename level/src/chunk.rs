@@ -10,6 +10,26 @@ const fn bit_at(val: u16, idx: u8) -> bool {
     (val >> idx) & 0b1 != 0
 }
 
+const fn section_size_pv0(sky_light: bool, add: bool) -> usize {
+    4096 + (2 * 2048) + 256 + if sky_light {
+        2048
+    } else {
+        0
+    } + if add {
+        2048
+    } else {
+        0
+    }
+} 
+/// # Safety
+/// dst should be allocated properly, initialised, and no other references should point to it
+unsafe fn assign_ref<'a, const N: usize, T: From<&'a mut [u8; N]>>(
+    dst: &mut *mut u8,
+) -> T {
+    let p = dst.cast() as *mut [u8; N];
+    *dst = dst.add(N);
+    (&mut *p).into()
+}
 /// A chunk column, not including heightmaps
 pub struct ChunkColumn<const N: usize, S> {
     pub sections: [Option<S>; N],
@@ -27,9 +47,24 @@ impl Default for ChunkColumn0<'_> {
     }
 }
 
-impl ChunkColumn0<'_> {
-    const MINIMUM_SECTION_SIZE: usize = 4096 + (3 * 2048);
+macro_rules! insert_opt_field {
+    ($i:ident, $f:ident) => {
+        pub fn $f(&mut self, section: usize) {
+            let p: *mut u8 = self.reallocate(2048).as_mut_ptr().cast();
+            // zero-initialise the buffer
+            // SAFETY: This is fine because we know `p` has been allocated for `size`.
+            unsafe { p.write_bytes(0, 2048) };
+            if let Some(section)  = &mut self.sections[section] {
+                assert!(section.$i.is_none());
+                section.$i = unsafe { Some((&mut *(p.cast() as *mut [u8; 2048])).into()) }
+            } else {
+                panic!("chunk section does not exist")
+            }
+        }
+    };
+}
 
+impl ChunkColumn0<'_> {
     /// Constructs a new `ChunkColumn0`, doesn't allocate.
     pub fn new() -> Self {
         Self {
@@ -41,6 +76,35 @@ impl ChunkColumn0<'_> {
             ],
         }
     }
+
+    /// Creates a new section and zero-initialises all of the buffers
+    pub fn insert_section(&mut self, section: usize, add: bool, sky_light: bool) {
+        assert!(self.sections[section].is_none()); 
+        let size = section_size_pv0(sky_light, add);
+        let mut p: *mut u8 = self.reallocate(size).as_mut_ptr().cast();
+        // zero-initialise the buffer
+        // SAFETY: This is fine because we know `p` has been allocated for `size`.
+        unsafe { p.write_bytes(0, size) };
+        self.sections[section] = Some(ChunkSection0 {
+            blocks: unsafe { assign_ref(&mut p) },
+            metadata: unsafe { assign_ref(&mut p) },
+            light: unsafe { assign_ref(&mut p) },
+            sky_light: if sky_light {
+                Some(unsafe { assign_ref(&mut p) })
+            } else {
+                None
+            },
+            add: if add {
+                Some(unsafe { assign_ref(&mut p) })
+            } else {
+                None
+            },
+            biomes: unsafe { assign_ref(&mut p) },
+        })
+    }
+
+    insert_opt_field!(sky_light, insert_sky_light);
+    insert_opt_field!(add, insert_add);
 
     /// Reallocates the internal buffer extending it with `extend` and returning a reference to the part of the buffer that was just added.
     pub fn reallocate<'a>(&'a mut self, extend: usize) -> &mut [MaybeUninit<u8>] {
@@ -60,39 +124,30 @@ impl ChunkColumn0<'_> {
             unsafe { std::ptr::copy_nonoverlapping(buf.as_ptr(), new, self.size) };
             let mut p = new;
 
-            /// # Safety
-            /// dst should be allocated properly, initialised, and no other references should point to it
-            unsafe fn update_ref<'a, const N: usize, T: From<&'a mut [u8; N]>>(
-                dst: &mut *mut u8,
-            ) -> T {
-                let p = dst.cast() as *mut [u8; N];
-                *dst = dst.add(N);
-                (&mut *p).into()
-            }
             for i in 0..16 {
                 if let Some(old_section) = &self.sections[i] {
                     let section = Some(ChunkSection0 {
                         // SAFETY: We know dst is allocated, initialised and no other references point to it so this is fine.
-                        blocks: unsafe { update_ref(&mut p) },
+                        blocks: unsafe { assign_ref(&mut p) },
                         // SAFETY: See safety comment for `blocks`.
-                        metadata: unsafe { update_ref(&mut p) },
+                        metadata: unsafe { assign_ref(&mut p) },
                         // SAFETY: See safety comment for `blocks`.
-                        light: unsafe { update_ref(&mut p) },
+                        light: unsafe { assign_ref(&mut p) },
                         // SAFETY: See safety comment for `blocks`.
                         sky_light: if old_section.sky_light.is_some() {
                             // SAFETY: See safety comment for `blocks`.
-                            Some(unsafe { update_ref(&mut p) })
+                            Some(unsafe { assign_ref(&mut p) })
                         } else {
                             None
                         },
                         add: if old_section.add.is_some() {
                             // SAFETY: See safety comment for `blocks`.
-                            Some(unsafe { update_ref(&mut p) })
+                            Some(unsafe { assign_ref(&mut p) })
                         } else {
                             None
                         },
                         // SAFETY: See safety comment for `blocks`.
-                        biomes: unsafe { update_ref(&mut p) },
+                        biomes: unsafe { assign_ref(&mut p) },
                     });
                     sections[i] = section;
                 }
@@ -152,27 +207,19 @@ impl<'a> ChunkColumn0<'a> {
     ) -> miners::encoding::decode::Result<Self> {
         let mut decode_sections: [Option<ChunkSection0Decode>; 16] = [None; 16];
 
-        let mut nsections = 0;
-        let mut nadd = 0;
-        let mut nsky_light = 0;
+        let mut size = 0;
         // create sections according to the bitmask
         for i in 0u8..16 {
             let exists: bool = bit_at(bitmask, i);
-            let add: bool = bit_at(add, i);
-            let sky_light: bool = bit_at(sky_light, i);
             if exists {
+                let add: bool = bit_at(add, i);
+                let sky_light: bool = bit_at(sky_light, i);
                 decode_sections[i as usize] =
                     Some(ChunkSection0Decode::from_reader(cursor, sky_light, add)?);
-                if add {
-                    nadd += 1;
-                }
-                if sky_light {
-                    nsky_light += 1
-                }
-                nsections += 1;
+                size += section_size_pv0(sky_light, add);
             }
         }
-        let size = (nsections * Self::MINIMUM_SECTION_SIZE) + (nsky_light * 2048) + (nadd * 2048);
+
         let mut vec = Vec::<u8>::with_capacity(size);
         let data = vec.as_mut_ptr();
         std::mem::forget(vec);
@@ -407,6 +454,6 @@ mod tests {
         let mut chunk =
             ChunkColumn0::from_reader(&mut std::io::Cursor::new(&data), bitmask, add, sky_light)
                 .unwrap();
-        chunk.reallocate(1024);
+        chunk.insert_section(6, false, false)
     }
 }
