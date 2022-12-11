@@ -237,12 +237,49 @@ impl<'a> ChunkColumn0<'a> {
 
 #[repr(C)]
 pub struct ChunkSection0<'a> {
-    pub blocks: &'a mut ByteArray<4096>,
-    pub metadata: &'a mut HalfByteArray<2048>,
-    pub light: &'a mut HalfByteArray<2048>,
-    pub sky_light: Option<&'a mut HalfByteArray<2048>>,
-    pub add: Option<&'a mut HalfByteArray<2048>>,
-    pub biomes: &'a mut HalfByteArray<256>,
+    pub(crate) blocks: &'a mut ByteArray<4096>,
+    pub(crate) metadata: &'a mut HalfByteArray<2048>,
+    pub(crate) light: &'a mut HalfByteArray<2048>,
+    pub(crate) sky_light: Option<&'a mut HalfByteArray<2048>>,
+    pub(crate) add: Option<&'a mut HalfByteArray<2048>>,
+    pub(crate) biomes: &'a mut ByteArray<256>,
+}
+
+macro_rules! getter {
+    ($i:ident, $m:ident, $t:ty) => {
+        pub fn $i(&self ) -> &&mut$t {
+            &self.$i
+        }
+
+        pub fn $m(&mut self ) -> &mut $t {
+            self.$i
+        }    
+    };
+}
+
+macro_rules! opt_getter {
+    ($i:ident, $m:ident, $t:ty) => {
+        pub fn $i(&self ) -> &Option<&mut$t> {
+            &self.$i
+        }
+
+        pub fn $m(&mut self ) -> Option<&mut $t> {
+            if let Some(v) = self.$i.as_mut() {
+                Some(v)
+            } else {
+                None
+            }
+        }    
+    };
+}
+
+impl ChunkSection0<'_> {
+    getter!(blocks, blocks_mut, ByteArray<4096>);
+    getter!(metadata, metadata_mut, HalfByteArray<2048>);
+    getter!(light, light_mut, HalfByteArray<2048>);
+    opt_getter!(sky_light, sky_light_mut, HalfByteArray<2048>);
+    opt_getter!(add, add_mut, HalfByteArray<2048>);
+    getter!(biomes, biomes_mut, ByteArray<256>);
 }
 
 /// This is only used internally for Decoding
@@ -254,7 +291,7 @@ struct ChunkSection0Decode<'a> {
     pub light: &'a HalfByteArray<2048>,
     pub sky_light: Option<&'a HalfByteArray<2048>>,
     pub add: Option<&'a HalfByteArray<2048>>,
-    pub biomes: &'a HalfByteArray<256>,
+    pub biomes: &'a ByteArray<256>,
 }
 
 impl<'a> ChunkSection0Decode<'a> {
@@ -277,7 +314,7 @@ impl<'a> ChunkSection0Decode<'a> {
             } else {
                 None
             },
-            biomes: <&HalfByteArray<256>>::decode(cursor)?,
+            biomes: <&ByteArray<256>>::decode(cursor)?,
         })
     }
 }
