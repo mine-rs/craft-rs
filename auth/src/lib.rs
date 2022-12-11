@@ -37,7 +37,7 @@ async fn read_string_from<R: AsyncRead + Unpin>(r: &mut R) -> Result<String, Err
 
 async fn write_string_to<W: AsyncWrite + Unpin>(w: &mut W, s: &String) -> std::io::Result<()> {
     let len = (s.len() as u16).to_le_bytes();
-    w.write(&len).await?;
+    w.write_all(&len).await?;
     w.write_all(s.as_bytes()).await?;
     Ok(())
 }
