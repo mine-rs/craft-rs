@@ -242,7 +242,7 @@ pub struct ChunkSection0<'a> {
     pub light: &'a mut HalfByteArray<2048>,
     pub sky_light: Option<&'a mut HalfByteArray<2048>>,
     pub add: Option<&'a mut HalfByteArray<2048>>,
-    pub biomes: &'a mut HalfByteArray<2048>,
+    pub biomes: &'a mut HalfByteArray<256>,
 }
 
 /// This is only used internally for Decoding
@@ -254,7 +254,7 @@ struct ChunkSection0Decode<'a> {
     pub light: &'a HalfByteArray<2048>,
     pub sky_light: Option<&'a HalfByteArray<2048>>,
     pub add: Option<&'a HalfByteArray<2048>>,
-    pub biomes: &'a HalfByteArray<2048>,
+    pub biomes: &'a HalfByteArray<256>,
 }
 
 impl<'a> ChunkSection0Decode<'a> {
@@ -277,7 +277,7 @@ impl<'a> ChunkSection0Decode<'a> {
             } else {
                 None
             },
-            biomes: <&HalfByteArray<2048>>::decode(cursor)?,
+            biomes: <&HalfByteArray<256>>::decode(cursor)?,
         })
     }
 }
@@ -356,8 +356,8 @@ mod tests {
                     data.push(i as u8)
                 }
             }
-            for i in 0u16..2048 {
-                data.push(i as u8)
+            for i in 0u8..=255 {
+                data.push(i)
             }
         }
 
