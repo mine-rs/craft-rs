@@ -6,7 +6,7 @@ use crate::containers::{ByteArray, HalfByteArray};
 
 #[inline]
 const fn bit_at(val: u16, idx: u8) -> bool {
-    debug_assert!(!(idx > 0x0f));
+    debug_assert!((idx <= 0x0f));
     (val >> idx) & 0b1 != 0
 }
 
@@ -36,11 +36,11 @@ impl ChunkColumn0<'_> {
         }
     }
 
-    /// Reallocates the internal buffer extending it with `N` and returning a reference to the part of the buffer that was just added.
-    pub fn reallocate<'a, const N: usize>(&'a mut self) -> &'a mut [MaybeUninit<u8>; N] {
-        assert!(N != 0);
+    /// Reallocates the internal buffer extending it with `extend` and returning a reference to the part of the buffer that was just added.
+    pub fn reallocate<'a>(&'a mut self, extend: usize) -> &mut [MaybeUninit<u8>] {
+        assert!(extend != 0);
         
-        let mut vec = Vec::<u8>::with_capacity(self.size + N);
+        let mut vec = Vec::<u8>::with_capacity(self.size + extend);
         let new = vec.as_mut_ptr();
         std::mem::forget(vec);
 
@@ -95,15 +95,15 @@ impl ChunkColumn0<'_> {
         let this = Self {
             // SAFETY: This is safe because we know new isn't a null pointer.
             buf: unsafe { Some(NonNull::new_unchecked(new)) },
-            size: self.size + N,
+            size: self.size + extend,
             sections,
         };
 
         let old_size = self.size;
         *self = this;
 
-        // SAFETY: This is to return a reference to the (uninitialised) added part of the buffer
-        unsafe { &mut *new.add(old_size).cast() }
+        // SAFETY: This is sound because we're using `MaybeUninit<u8>` and we know the memory has been allocated.
+        unsafe { std::slice::from_raw_parts_mut(new.add(old_size).cast(), extend) }
     }
 }
 
@@ -129,8 +129,8 @@ impl<'a> ChunkColumn0<'a> {
 
 impl<'a> Drop for ChunkColumn0<'a> {
     fn drop(&mut self) {
-        // SAFETY: This is fine because the buffer was allocated with `Vec`.
         if let Some(buf) = self.buf {
+            // SAFETY: This is fine because the buffer was allocated with `Vec`.
             let vec = unsafe { Vec::<u8>::from_raw_parts(buf.as_ptr(), self.size, self.size) };
             drop(vec)
         }
@@ -401,6 +401,6 @@ mod tests {
         let mut chunk =
             ChunkColumn0::from_reader(&mut std::io::Cursor::new(&data), bitmask, add, sky_light)
                 .unwrap();
-        chunk.reallocate::<1024>();
+        chunk.reallocate(1024);
     }
 }
