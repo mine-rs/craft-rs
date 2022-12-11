@@ -21,6 +21,12 @@ pub struct ChunkColumn0<'a> {
     sections: [Option<ChunkSection0<'a>>; 16],
 }
 
+impl Default for ChunkColumn0<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ChunkColumn0<'_> {
     const MINIMUM_SECTION_SIZE: usize = 4096 + (3 * 2048);
 
