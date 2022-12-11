@@ -1,4 +1,4 @@
-use std::mem::MaybeUninit;
+use std::{mem::MaybeUninit, ptr::NonNull};
 
 use miners::encoding::{Decode, Encode};
 
@@ -16,7 +16,7 @@ pub struct ChunkColumn<const N: usize, S> {
 }
 
 pub struct ChunkColumn0<'a> {
-    buf: *mut u8,
+    buf: Option<NonNull<u8>>,
     size: usize,
     sections: [Option<ChunkSection0<'a>>; 16],
 }
@@ -24,63 +24,86 @@ pub struct ChunkColumn0<'a> {
 impl ChunkColumn0<'_> {
     const MINIMUM_SECTION_SIZE: usize = 4096 + (3 * 2048);
 
-    /// Reallocates the internal buffer extending it with `N` and returning a pointer to the part of the buffer that was just added.
+    /// Constructs a new `ChunkColumn0`, doesn't allocate.
+    pub fn new() -> Self {
+        Self {
+            buf: None,
+            size: 0,
+            sections: [
+                None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+                None, None,
+            ],
+        }
+    }
+
+    /// Reallocates the internal buffer extending it with `N` and returning a reference to the part of the buffer that was just added.
     pub fn reallocate<'a, const N: usize>(&'a mut self) -> &'a mut [MaybeUninit<u8>; N] {
+        assert!(N != 0);
+        
         let mut vec = Vec::<u8>::with_capacity(self.size + N);
         let new = vec.as_mut_ptr();
         std::mem::forget(vec);
-        // SAFETY: This is fine because we know self.buf is initialised and new and self.buf don't overlap.
-        unsafe { std::ptr::copy_nonoverlapping(self.buf, new, self.size) };
-        let mut sections: [Option<ChunkSection0>; 16] =
-        // SAFETY: We have to do this weird thing because ChunkSection doesn't implement Copy, it is completely safe though as the union fields have the same layout
-            unsafe { std::mem::transmute([Option::<ChunkSection0Decode>::None; 16]) };
-        let mut p = new;
-        /// # Safety
-        /// dst should be allocated properly, initialised, and no other references should point to it
-        unsafe fn update_ref<'a, const N: usize, T: From<&'a mut [u8; N]>>(dst: &mut *mut u8) -> T {
-            let p = dst.cast() as *mut [u8; N];
-            *dst = dst.add(N);
-            (&mut *p).into()
-        }
-        for i in 0..16 {
-            if let Some(old_section) = &self.sections[i] {
-                let section = Some(ChunkSection0 {
-                    // SAFETY: We know dst is allocated, initialised and no other references point to it so this is fine.
-                    blocks: unsafe { update_ref(&mut p) },
-                    // SAFETY: See safety comment for `blocks`.
-                    metadata: unsafe { update_ref(&mut p) },
-                    // SAFETY: See safety comment for `blocks`.
-                    light: unsafe { update_ref(&mut p) },
-                    // SAFETY: See safety comment for `blocks`.
-                    sky_light: if old_section.sky_light.is_some() {
+
+        let mut sections: [Option<ChunkSection0>; 16] = [
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None,
+        ];
+
+        if let Some(buf) = self.buf {
+            // SAFETY: This is fine because we know self.buf is initialised and new and self.buf don't overlap.
+            unsafe { std::ptr::copy_nonoverlapping(buf.as_ptr(), new, self.size) };
+            let mut p = new;
+
+            /// # Safety
+            /// dst should be allocated properly, initialised, and no other references should point to it
+            unsafe fn update_ref<'a, const N: usize, T: From<&'a mut [u8; N]>>(
+                dst: &mut *mut u8,
+            ) -> T {
+                let p = dst.cast() as *mut [u8; N];
+                *dst = dst.add(N);
+                (&mut *p).into()
+            }
+            for i in 0..16 {
+                if let Some(old_section) = &self.sections[i] {
+                    let section = Some(ChunkSection0 {
+                        // SAFETY: We know dst is allocated, initialised and no other references point to it so this is fine.
+                        blocks: unsafe { update_ref(&mut p) },
                         // SAFETY: See safety comment for `blocks`.
-                        Some(unsafe { update_ref(&mut p) })
-                    } else {
-                        None
-                    },
-                    add: if old_section.add.is_some() {
+                        metadata: unsafe { update_ref(&mut p) },
                         // SAFETY: See safety comment for `blocks`.
-                        Some(unsafe { update_ref(&mut p) })
-                    } else {
-                        None
-                    },
-                    // SAFETY: See safety comment for `blocks`.
-                    biomes: unsafe { update_ref(&mut p) },
-                });
-                sections[i] = section;
+                        light: unsafe { update_ref(&mut p) },
+                        // SAFETY: See safety comment for `blocks`.
+                        sky_light: if old_section.sky_light.is_some() {
+                            // SAFETY: See safety comment for `blocks`.
+                            Some(unsafe { update_ref(&mut p) })
+                        } else {
+                            None
+                        },
+                        add: if old_section.add.is_some() {
+                            // SAFETY: See safety comment for `blocks`.
+                            Some(unsafe { update_ref(&mut p) })
+                        } else {
+                            None
+                        },
+                        // SAFETY: See safety comment for `blocks`.
+                        biomes: unsafe { update_ref(&mut p) },
+                    });
+                    sections[i] = section;
+                }
             }
         }
-        let new = Self {
-            buf: new,
+        let this = Self {
+            // SAFETY: This is safe because we know new isn't a null pointer.
+            buf: unsafe { Some(NonNull::new_unchecked(new)) },
             size: self.size + N,
             sections,
         };
 
         let old_size = self.size;
-        *self = new;
+        *self = this;
 
         // SAFETY: This is to return a reference to the (uninitialised) added part of the buffer
-        unsafe { &mut *self.buf.add(old_size).cast() }
+        unsafe { &mut *new.add(old_size).cast() }
     }
 }
 
@@ -107,8 +130,10 @@ impl<'a> ChunkColumn0<'a> {
 impl<'a> Drop for ChunkColumn0<'a> {
     fn drop(&mut self) {
         // SAFETY: This is fine because the buffer was allocated with `Vec`.
-        let vec = unsafe { Vec::<u8>::from_raw_parts(self.buf, self.size, self.size) };
-        drop(vec)
+        if let Some(buf) = self.buf {
+            let vec = unsafe { Vec::<u8>::from_raw_parts(buf.as_ptr(), self.size, self.size) };
+            drop(vec)
+        }
     }
 }
 
@@ -146,9 +171,11 @@ impl<'a> ChunkColumn0<'a> {
         let data = vec.as_mut_ptr();
         std::mem::forget(vec);
 
-        let mut sections: [Option<ChunkSection0>; 16] =
-        // SAFETY: We have to do this weird thing because ChunkSection doesn't implement Copy, it is completely safe though as the union fields have the same layout
-            unsafe { std::mem::transmute([Option::<ChunkSection0Decode>::None; 16]) };
+        let mut sections: [Option<ChunkSection0>; 16] = [
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None,
+        ];
+
         // loop through the sections
         let mut p = data;
         for i in 0u8..16 {
@@ -199,7 +226,8 @@ impl<'a> ChunkColumn0<'a> {
         }
         // SAFETY: This is fine because ChunkSection0 and ChunkSection0Decode have the same type layout
         Ok(Self {
-            buf: data,
+            // SAFETY: This is fine because we know data is not null
+            buf: unsafe { Some(NonNull::new_unchecked(data)) },
             size,
             // SAFETY: This is fine because we know both union fields have the exact same layout.
             sections,
