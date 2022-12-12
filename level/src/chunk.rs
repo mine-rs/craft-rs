@@ -42,6 +42,18 @@ pub struct ChunkColumn0<'a> {
     sections: [Option<ChunkSection0<'a>>; 16],
 }
 
+impl Encode for ChunkColumn0<'_> {
+    // This implementation only writes the chunk data, not the metadata.
+    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
+        for section in &self.sections {
+            if let Some(section) = section {
+                section.encode(writer);
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Default for ChunkColumn0<'_> {
     fn default() -> Self {
         Self::new(true)
@@ -162,6 +174,36 @@ impl ChunkColumn0<'_> {
         // SAFETY: This is sound because we're using `MaybeUninit<u8>` and we know the memory has been allocated.
         unsafe { std::slice::from_raw_parts_mut(new.add(old_size).cast(), extend) }
     }
+
+    /// Returns a bool indicating if this column stores sky light data.
+    pub fn sky_light(&self) -> bool {
+        self.sky_light
+    }
+
+    pub fn construct_add(&self) -> u16 {
+        let mut bitmask: u16 = 0;
+        for (i, section) in self.sections.iter().enumerate() {
+            if let Some(section) = section {
+                if section.add.is_some() {
+                    // flip the bit corresponding to the section
+                    bitmask |= 1 << i
+                }
+            }
+        }
+        bitmask
+    }
+
+    /// Constructs the primary bitmask for this chunk column.
+    pub fn construct_bitmask(&self) -> u16 {
+        let mut bitmask: u16 = 0;
+        for (i, section) in self.sections.iter().enumerate() {
+            if section.is_some() {
+                // flip the bit corresponding to the section
+                bitmask |= 1 << i
+            }
+        }
+        bitmask
+    }
 }
 
 impl<'a> ChunkColumn0<'a> {
@@ -182,19 +224,7 @@ impl<'a> ChunkColumn0<'a> {
             None
         }
     }
-}
 
-impl<'a> Drop for ChunkColumn0<'a> {
-    fn drop(&mut self) {
-        if let Some(buf) = self.buf {
-            // SAFETY: This is fine because the buffer was allocated with `Vec`.
-            let vec = unsafe { Vec::<u8>::from_raw_parts(buf.as_ptr(), self.size, self.size) };
-            drop(vec)
-        }
-    }
-}
-
-impl<'a> ChunkColumn0<'a> {
     pub fn from_reader(
         cursor: &mut std::io::Cursor<&'a [u8]>,
         bitmask: u16,
@@ -282,6 +312,16 @@ impl<'a> ChunkColumn0<'a> {
     }
 }
 
+impl<'a> Drop for ChunkColumn0<'a> {
+    fn drop(&mut self) {
+        if let Some(buf) = self.buf {
+            // SAFETY: This is fine because the buffer was allocated with `Vec`.
+            let vec = unsafe { Vec::<u8>::from_raw_parts(buf.as_ptr(), self.size, self.size) };
+            drop(vec)
+        }
+    }
+}
+
 #[repr(C)]
 pub struct ChunkSection0<'a> {
     pub(crate) blocks: &'a mut ByteArray<4096>,
@@ -290,6 +330,22 @@ pub struct ChunkSection0<'a> {
     pub(crate) sky_light: Option<&'a mut HalfByteArray<2048>>,
     pub(crate) add: Option<&'a mut HalfByteArray<2048>>,
     pub(crate) biomes: &'a mut ByteArray<256>,
+}
+
+impl Encode for ChunkSection0<'_> {
+    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
+        writer.write_all(self.blocks.as_ref())?;
+        writer.write_all(self.metadata.as_ref())?;
+        writer.write_all(self.light.as_ref())?;
+        if let Some(sky_light) = &self.sky_light {
+            writer.write_all(sky_light.as_ref())?;
+        }
+        if let Some(add) = &self.add {
+            writer.write_all(add.as_ref())?;
+        }
+        writer.write_all(self.biomes.as_ref())?;
+        Ok(())
+    }
 }
 
 macro_rules! getter {

@@ -9,6 +9,12 @@ pub mod palette;
 #[repr(transparent)]
 pub struct ByteArray<const N: usize>([u8; N]);
 
+impl<const N: usize> AsRef<[u8]> for ByteArray<N> {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
 impl<'a, const N: usize> From<&'a [u8; N]> for &'a ByteArray<N> {
     fn from(value: &'a [u8; N]) -> Self {
         // SAFETY: This is fine because ByteArray is repr(transparent)
@@ -85,6 +91,12 @@ fn decode_slice<'dec, const N: usize>(
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct HalfByteArray<const RLEN: usize>([u8; RLEN]);
+
+impl<const RLEN: usize> AsRef<[u8]> for HalfByteArray<RLEN> {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
 
 impl<'a, const RLEN: usize> From<&'a [u8; RLEN]> for &'a HalfByteArray<RLEN> {
     fn from(value: &'a [u8; RLEN]) -> Self {
