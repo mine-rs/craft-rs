@@ -37,39 +37,24 @@ pub struct ChunkColumn<const N: usize, S> {
 
 pub struct ChunkColumn0<'a> {
     buf: Option<NonNull<u8>>,
+    sky_light: bool,
     size: usize,
     sections: [Option<ChunkSection0<'a>>; 16],
 }
 
 impl Default for ChunkColumn0<'_> {
     fn default() -> Self {
-        Self::new()
+        Self::new(true)
     }
-}
-
-macro_rules! insert_opt_field {
-    ($i:ident, $f:ident) => {
-        pub fn $f(&mut self, section: usize) {
-            let p: *mut u8 = self.reallocate(2048).as_mut_ptr().cast();
-            // zero-initialise the buffer
-            // SAFETY: This is fine because we know `p` has been allocated for `size`.
-            unsafe { p.write_bytes(0, 2048) };
-            if let Some(section)  = &mut self.sections[section] {
-                assert!(section.$i.is_none());
-                section.$i = unsafe { Some((&mut *(p.cast() as *mut [u8; 2048])).into()) }
-            } else {
-                panic!("chunk section does not exist")
-            }
-        }
-    };
 }
 
 impl ChunkColumn0<'_> {
     /// Constructs a new `ChunkColumn0`, doesn't allocate.
-    pub fn new() -> Self {
+    pub fn new(sky_light: bool) -> Self {
         Self {
             buf: None,
             size: 0,
+            sky_light,
             sections: [
                 None, None, None, None, None, None, None, None, None, None, None, None, None, None,
                 None, None,
@@ -78,9 +63,9 @@ impl ChunkColumn0<'_> {
     }
 
     /// Creates a new section and zero-initialises all of the buffers
-    pub fn insert_section(&mut self, section: usize, add: bool, sky_light: bool) {
+    pub fn insert_section(&mut self, section: usize, add: bool) {
         assert!(self.sections[section].is_none()); 
-        let size = section_size_pv0(sky_light, add);
+        let size = section_size_pv0(self.sky_light, add);
         let mut p: *mut u8 = self.reallocate(size).as_mut_ptr().cast();
         // zero-initialise the buffer
         // SAFETY: This is fine because we know `p` has been allocated for `size`.
@@ -89,7 +74,7 @@ impl ChunkColumn0<'_> {
             blocks: unsafe { assign_ref(&mut p) },
             metadata: unsafe { assign_ref(&mut p) },
             light: unsafe { assign_ref(&mut p) },
-            sky_light: if sky_light {
+            sky_light: if self.sky_light {
                 Some(unsafe { assign_ref(&mut p) })
             } else {
                 None
@@ -103,8 +88,18 @@ impl ChunkColumn0<'_> {
         })
     }
 
-    insert_opt_field!(sky_light, insert_sky_light);
-    insert_opt_field!(add, insert_add);
+    pub fn insert_add(&mut self, section: usize) {
+        let p: *mut u8 = self.reallocate(2048).as_mut_ptr().cast();
+        // zero-initialise the buffer
+        // SAFETY: This is fine because we know `p` has been allocated for `size`.
+        unsafe { p.write_bytes(0, 2048) };
+        if let Some(section)  = &mut self.sections[section] {
+            assert!(section.add.is_none());
+            section.add = unsafe { Some((&mut *(p.cast() as *mut [u8; 2048])).into()) }
+        } else {
+            panic!("chunk section does not exist")
+        }
+    }
 
     /// Reallocates the internal buffer extending it with `extend` and returning a reference to the part of the buffer that was just added.
     pub fn reallocate<'a>(&'a mut self, extend: usize) -> &mut [MaybeUninit<u8>] {
@@ -157,6 +152,7 @@ impl ChunkColumn0<'_> {
             // SAFETY: This is safe because we know new isn't a null pointer.
             buf: unsafe { Some(NonNull::new_unchecked(new)) },
             size: self.size + extend,
+            sky_light: self.sky_light,
             sections,
         };
 
@@ -276,12 +272,11 @@ impl<'a> ChunkColumn0<'a> {
                 sections[i as usize] = Some(section);
             }
         }
-        // SAFETY: This is fine because ChunkSection0 and ChunkSection0Decode have the same type layout
         Ok(Self {
             // SAFETY: This is fine because we know data is not null
             buf: unsafe { Some(NonNull::new_unchecked(data)) },
             size,
-            // SAFETY: This is fine because we know both union fields have the exact same layout.
+            sky_light,
             sections,
         })
     }
@@ -452,6 +447,6 @@ mod tests {
         let mut chunk =
             ChunkColumn0::from_reader(&mut std::io::Cursor::new(&data), bitmask, add, sky_light)
                 .unwrap();
-        chunk.insert_section(6, false, false)
+        chunk.insert_section(6, false)
     }
 }
