@@ -203,7 +203,7 @@ impl<'a> ChunkColumn0<'a> {
         cursor: &mut std::io::Cursor<&'a [u8]>,
         bitmask: u16,
         add: u16,
-        sky_light: u16,
+        sky_light: bool,
     ) -> miners::encoding::decode::Result<Self> {
         let mut decode_sections: [Option<ChunkSection0Decode>; 16] = [None; 16];
 
@@ -213,7 +213,6 @@ impl<'a> ChunkColumn0<'a> {
             let exists: bool = bit_at(bitmask, i);
             if exists {
                 let add: bool = bit_at(add, i);
-                let sky_light: bool = bit_at(sky_light, i);
                 decode_sections[i as usize] =
                     Some(ChunkSection0Decode::from_reader(cursor, sky_light, add)?);
                 size += section_size_pv0(sky_light, add);
@@ -421,7 +420,7 @@ mod tests {
         //TODO: use real data from minecraft
         let bitmask = 0b1011001110110011u16;
         let add = 0b1001001010010010u16;
-        let sky_light = 0b0010000100100001u16;
+        let sky_light = true;
 
         let mut data = Vec::<u8>::new();
 
@@ -429,7 +428,6 @@ mod tests {
             let exists = bit_at(bitmask, i);
             let add = bit_at(add, i);
             print!("{:b}", add as u8);
-            let sky_light = bit_at(bitmask, i);
             if exists {
                 for i in 0u16..4096 {
                     data.push(i as u8);
