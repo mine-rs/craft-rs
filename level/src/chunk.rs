@@ -47,7 +47,7 @@ impl Encode for ChunkColumn0<'_> {
     fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
         for section in &self.sections {
             if let Some(section) = section {
-                section.encode(writer);
+                section.encode(writer)?;
             }
         }
         Ok(())
