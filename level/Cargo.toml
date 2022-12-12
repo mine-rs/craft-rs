@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 thiserror = "1.0.37"
 miners = { git = "https://github.com/mine-rs/mine-rs" }
+flate2 = "1.0.25"

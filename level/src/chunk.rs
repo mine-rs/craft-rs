@@ -45,11 +45,14 @@ pub struct ChunkColumn0<'a> {
 impl Encode for ChunkColumn0<'_> {
     // This implementation only writes the chunk data, not the metadata.
     fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
+        let mut compression = flate2::write::ZlibEncoder::new(writer, flate2::Compression::fast());
         for section in &self.sections {
             if let Some(section) = section {
-                section.encode(writer)?;
+                // TODO: add a way for the user to specify the compression level.
+                section.encode(&mut compression)?;
             }
         }
+        compression.flush_finish()?;
         Ok(())
     }
 }
