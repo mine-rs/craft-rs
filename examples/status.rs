@@ -41,13 +41,13 @@ async fn main() {
     println!("{ADDRESS}:\n\tRESPONSE: {resp}");
     // ping
     let time = std::time::Instant::now();
-    let secs = time.elapsed().as_secs();
-    conn.write_half.write_packet(version, Ping { time: secs as i64 }, &mut encoder).await.unwrap();
+    let payload = chrono::Utc::now().timestamp();
+    conn.write_half.write_packet(version, Ping { time: payload }, &mut encoder).await.unwrap();
     conn.write_half.flush().await.unwrap();
     let (id, data) = conn.read_half.read_encoded().await.unwrap().into_packet().unwrap();
     assert_eq!(id, 0x01);
     let pong = Pong::decode(&mut Cursor::new(data)).unwrap().time;
-    assert_eq!(pong, secs as i64);
+    assert_eq!(pong, payload);
     let elapsed = time.elapsed().as_millis();
     println!("--------------------------------------------------------------------------------\n\tPING:{elapsed}ms");
 }
