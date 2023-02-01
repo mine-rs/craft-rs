@@ -5,6 +5,96 @@ use miners::encoding::{Decode, Encode};
 pub mod bitpack;
 pub mod palette;
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Block49(u16);
+
+impl Block49 {
+    pub fn id(self) -> u16 {
+        self.0 >> 4
+    }
+
+    pub fn metadata(self) -> u16 {
+        self.0 & 0x000f
+    }
+}
+
+#[repr(transparent)]
+#[derive(Clone, Copy)]
+pub struct BlockArray49<const N: usize>([Block49; N]);
+
+impl<const N: usize> AsRef<[Block49]> for BlockArray49<N> {
+    fn as_ref(&self) -> &[Block49] {
+        self.0.as_slice()
+    }
+}
+
+impl<'a, const N: usize> AsRef<[u8]> for BlockArray49<N> {
+    fn as_ref(&self) -> &[u8] {
+        // SAFETY: This is safe because BlockArray49 is an array of u16's which means the size in bytes is N * 2.
+        unsafe { std::slice::from_raw_parts(self as *const BlockArray49<N> as *const u8, N * 2) }
+    }
+}
+
+impl<'a, const N: usize> From<&'a [u8; N]> for &'a BlockArray49<N> {
+    fn from(value: &'a [u8; N]) -> Self {
+        // SAFETY: This is fine because ByteArray is repr(transparent)
+        unsafe { transmute(value) }
+    }
+}
+
+impl<'a, const N: usize> From<&'a BlockArray49<N>> for &'a [u8; N] {
+    fn from(value: &'a BlockArray49<N>) -> Self {
+        // SAFETY: This is fine because ByteArray is repr(transparent)
+        unsafe { transmute(value) }
+    }
+}
+
+impl<'a, const N: usize> From<&'a mut [u8; N]> for &'a mut BlockArray49<N> {
+    fn from(value: &'a mut [u8; N]) -> Self {
+        // SAFETY: This is fine because ByteArray is repr(transparent)
+        unsafe { transmute(value) }
+    }
+}
+
+impl<'a, const N: usize> From<&'a mut BlockArray49<N>> for &'a mut [u8; N] {
+    fn from(value: &'a mut BlockArray49<N>) -> Self {
+        // SAFETY: This is fine because ByteArray is repr(transparent)
+        unsafe { transmute(value) }
+    }
+}
+
+impl<const N: usize> Encode for BlockArray49<N> {
+    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
+        writer.write_all(self.as_ref()).map_err(From::from)
+    }
+}
+
+impl<'dec, const N: usize> Decode<'dec> for &BlockArray49<N> {
+    fn decode(cursor: &mut std::io::Cursor<&'dec [u8]>) -> miners::encoding::decode::Result<Self> {
+        let slice = decode_slice::<N>(cursor)?;
+        // SAFETY: This is safe because we created the ptr from a slice that we know has a len of RLEN
+        let data: &[u8; N] = unsafe { &*(slice.as_ptr().cast() as *const [u8; N]) };
+        //let this = unsafe { Box::new(data) };
+        Ok(Self::from(data))
+    }
+}
+
+
+// SAFETY: This is fine because we uphold all of the invariants
+unsafe impl<const N: usize> ReadContainer<Block49> for BlockArray49<N> {
+    const N: usize = N;
+    unsafe fn get_unchecked(&self, i: usize) -> Block49 {
+        *self.0.get_unchecked(i)
+    }
+}
+
+// SAFETY: This is fine because we uphold all of the invariants
+unsafe impl<const N: usize> WriteContainer<Block49> for BlockArray49<N> {
+    unsafe fn set_unchecked(&mut self, i: usize, v: Block49) {
+        *self.0.get_unchecked_mut(i) = v
+    }
+}
+
 #[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct ByteArray<const N: usize>([u8; N]);

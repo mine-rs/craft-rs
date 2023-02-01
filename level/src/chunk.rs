@@ -2,7 +2,7 @@ use std::{mem::MaybeUninit, ptr::NonNull};
 
 use miners::encoding::{Decode, Encode};
 
-use crate::containers::{ByteArray, HalfByteArray};
+use crate::containers::{ByteArray, HalfByteArray, BlockArray49};
 
 #[inline]
 const fn bit_at(val: u16, idx: u8) -> bool {
@@ -10,8 +10,8 @@ const fn bit_at(val: u16, idx: u8) -> bool {
     (val >> idx) & 0b1 != 0
 }
 
-const fn section_size_pv0(sky_light: bool, add: bool) -> usize {
-    4096 + (2 * 2048) + 256 + if sky_light {
+const fn section_size_pv0(skylight: bool, add: bool) -> usize {
+    4096 + (2 * 2048) + 256 + if skylight {
         2048
     } else {
         0
@@ -30,6 +30,52 @@ unsafe fn assign_ref<'a, const N: usize, T: From<&'a mut [u8; N]>>(
     *dst = dst.add(N);
     (&mut *p).into()
 }
+
+pub struct ChunkColumn49<'a> {
+    buf: Option<NonNull<u8>>,
+    size: usize,
+    skylight: bool,
+    sections: [Option<ChunkSection49<'a>>; 16] 
+}
+
+impl ChunkColumn49<'_> {
+    pub fn from_reader(skylight: bool) -> Self {
+        
+        todo!()
+    }
+}
+
+#[repr(C)]
+pub struct ChunkSection49<'a> {
+    blocks: &'a mut BlockArray49<4096>,
+    light: &'a mut HalfByteArray<2048>,
+    skylight: Option<&'a mut HalfByteArray<2048>>,
+    biomes: &'a mut ByteArray<256>
+}
+
+#[repr(C)]
+struct ChunkSection49Decode<'a> {
+    blocks: &'a BlockArray49<4096>,
+    light: &'a HalfByteArray<2048>,
+    skylight: Option<&'a HalfByteArray<2048>>,
+    biomes:  &'a ByteArray<256>
+}
+
+impl<'a> ChunkSection49Decode<'a> {
+    pub fn from_reader(cursor: &mut std::io::Cursor<&'a [u8]>, skylight: bool) -> miners::encoding::decode::Result<Self> {
+        Ok(Self {
+            blocks: <&BlockArray49<4096>>::decode(cursor)?,
+            light: <&HalfByteArray<2048>>::decode(cursor)?,
+            skylight: if skylight {
+                Some(<&HalfByteArray<2048>>::decode(cursor)?)
+            } else {
+                None
+            },
+            biomes: <&ByteArray<256>>::decode(cursor)?,
+        })
+    }
+}
+
 /// A chunk column, not including heightmaps
 pub struct ChunkColumn<const N: usize, S> {
     pub sections: [Option<S>; N],
@@ -37,8 +83,8 @@ pub struct ChunkColumn<const N: usize, S> {
 
 pub struct ChunkColumn0<'a> {
     buf: Option<NonNull<u8>>,
-    sky_light: bool,
     size: usize,
+    skylight: bool,
     sections: [Option<ChunkSection0<'a>>; 16],
 }
 
@@ -65,11 +111,11 @@ impl Default for ChunkColumn0<'_> {
 
 impl ChunkColumn0<'_> {
     /// Constructs a new `ChunkColumn0`, doesn't allocate.
-    pub fn new(sky_light: bool) -> Self {
+    pub fn new(skylight: bool) -> Self {
         Self {
             buf: None,
             size: 0,
-            sky_light,
+            skylight,
             sections: [
                 None, None, None, None, None, None, None, None, None, None, None, None, None, None,
                 None, None,
@@ -80,7 +126,7 @@ impl ChunkColumn0<'_> {
     /// Creates a new section and zero-initialises all of the buffers
     pub fn insert_section(&mut self, section: usize, add: bool) {
         assert!(self.sections[section].is_none()); 
-        let size = section_size_pv0(self.sky_light, add);
+        let size = section_size_pv0(self.skylight, add);
         let mut p: *mut u8 = self.reallocate(size).as_mut_ptr().cast();
         // zero-initialise the buffer
         // SAFETY: This is fine because we know `p` has been allocated for `size`.
@@ -89,7 +135,7 @@ impl ChunkColumn0<'_> {
             blocks: unsafe { assign_ref(&mut p) },
             metadata: unsafe { assign_ref(&mut p) },
             light: unsafe { assign_ref(&mut p) },
-            sky_light: if self.sky_light {
+            skylight: if self.skylight {
                 Some(unsafe { assign_ref(&mut p) })
             } else {
                 None
@@ -117,7 +163,7 @@ impl ChunkColumn0<'_> {
     }
 
     /// Reallocates the internal buffer extending it with `extend` and returning a reference to the part of the buffer that was just added.
-    pub fn reallocate<'a>(&'a mut self, extend: usize) -> &mut [MaybeUninit<u8>] {
+    pub fn reallocate<'a>(&'a mut self, extend: usize) -> &'a mut [MaybeUninit<u8>] {
         assert!(extend != 0);
         
         let mut vec = Vec::<u8>::with_capacity(self.size + extend);
@@ -144,7 +190,7 @@ impl ChunkColumn0<'_> {
                         // SAFETY: See safety comment for `blocks`.
                         light: unsafe { assign_ref(&mut p) },
                         // SAFETY: See safety comment for `blocks`.
-                        sky_light: if old_section.sky_light.is_some() {
+                        skylight: if old_section.skylight.is_some() {
                             // SAFETY: See safety comment for `blocks`.
                             Some(unsafe { assign_ref(&mut p) })
                         } else {
@@ -167,7 +213,7 @@ impl ChunkColumn0<'_> {
             // SAFETY: This is safe because we know new isn't a null pointer.
             buf: unsafe { Some(NonNull::new_unchecked(new)) },
             size: self.size + extend,
-            sky_light: self.sky_light,
+            skylight: self.skylight,
             sections,
         };
 
@@ -179,8 +225,8 @@ impl ChunkColumn0<'_> {
     }
 
     /// Returns a bool indicating if this column stores sky light data.
-    pub fn sky_light(&self) -> bool {
-        self.sky_light
+    pub fn skylight(&self) -> bool {
+        self.skylight
     }
 
     pub fn construct_add(&self) -> u16 {
@@ -232,7 +278,7 @@ impl<'a> ChunkColumn0<'a> {
         cursor: &mut std::io::Cursor<&'a [u8]>,
         bitmask: u16,
         add: u16,
-        sky_light: bool,
+        skylight: bool,
     ) -> miners::encoding::decode::Result<Self> {
         let mut decode_sections: [Option<ChunkSection0Decode>; 16] = [None; 16];
 
@@ -243,8 +289,8 @@ impl<'a> ChunkColumn0<'a> {
             if exists {
                 let add: bool = bit_at(add, i);
                 decode_sections[i as usize] =
-                    Some(ChunkSection0Decode::from_reader(cursor, sky_light, add)?);
-                size += section_size_pv0(sky_light, add);
+                    Some(ChunkSection0Decode::from_reader(cursor, skylight, add)?);
+                size += section_size_pv0(skylight, add);
             }
         }
 
@@ -283,7 +329,7 @@ impl<'a> ChunkColumn0<'a> {
                     metadata: unsafe { (new_field(&mut p, section.metadata)).into() },
                     // SAFETY: See safety comment for `blocks`
                     light: unsafe { (new_field(&mut p, section.light)).into() },
-                    sky_light: if let Some(v) = section.sky_light {
+                    skylight: if let Some(v) = section.skylight {
                         Some(
                             // SAFETY: See safety comment for `blocks`
                             unsafe { (new_field(&mut p, v)).into() },
@@ -309,7 +355,7 @@ impl<'a> ChunkColumn0<'a> {
             // SAFETY: This is fine because we know data is not null
             buf: unsafe { Some(NonNull::new_unchecked(data)) },
             size,
-            sky_light,
+            skylight,
             sections,
         })
     }
@@ -327,12 +373,12 @@ impl<'a> Drop for ChunkColumn0<'a> {
 
 #[repr(C)]
 pub struct ChunkSection0<'a> {
-    pub(crate) blocks: &'a mut ByteArray<4096>,
-    pub(crate) metadata: &'a mut HalfByteArray<2048>,
-    pub(crate) light: &'a mut HalfByteArray<2048>,
-    pub(crate) sky_light: Option<&'a mut HalfByteArray<2048>>,
-    pub(crate) add: Option<&'a mut HalfByteArray<2048>>,
-    pub(crate) biomes: &'a mut ByteArray<256>,
+    blocks: &'a mut ByteArray<4096>,
+    metadata: &'a mut HalfByteArray<2048>,
+    light: &'a mut HalfByteArray<2048>,
+    skylight: Option<&'a mut HalfByteArray<2048>>,
+    add: Option<&'a mut HalfByteArray<2048>>,
+    biomes: &'a mut ByteArray<256>,
 }
 
 impl Encode for ChunkSection0<'_> {
@@ -340,8 +386,8 @@ impl Encode for ChunkSection0<'_> {
         writer.write_all(self.blocks.as_ref())?;
         writer.write_all(self.metadata.as_ref())?;
         writer.write_all(self.light.as_ref())?;
-        if let Some(sky_light) = &self.sky_light {
-            writer.write_all(sky_light.as_ref())?;
+        if let Some(skylight) = &self.skylight {
+            writer.write_all(skylight.as_ref())?;
         }
         if let Some(add) = &self.add {
             writer.write_all(add.as_ref())?;
@@ -383,7 +429,7 @@ impl ChunkSection0<'_> {
     getter!(blocks, blocks_mut, ByteArray<4096>);
     getter!(metadata, metadata_mut, HalfByteArray<2048>);
     getter!(light, light_mut, HalfByteArray<2048>);
-    opt_getter!(sky_light, sky_light_mut, HalfByteArray<2048>);
+    opt_getter!(skylight, skylight_mut, HalfByteArray<2048>);
     opt_getter!(add, add_mut, HalfByteArray<2048>);
     getter!(biomes, biomes_mut, ByteArray<256>);
 }
@@ -395,7 +441,7 @@ struct ChunkSection0Decode<'a> {
     pub blocks: &'a ByteArray<4096>,
     pub metadata: &'a HalfByteArray<2048>,
     pub light: &'a HalfByteArray<2048>,
-    pub sky_light: Option<&'a HalfByteArray<2048>>,
+    pub skylight: Option<&'a HalfByteArray<2048>>,
     pub add: Option<&'a HalfByteArray<2048>>,
     pub biomes: &'a ByteArray<256>,
 }
@@ -403,14 +449,14 @@ struct ChunkSection0Decode<'a> {
 impl<'a> ChunkSection0Decode<'a> {
     pub fn from_reader(
         cursor: &mut std::io::Cursor<&'a [u8]>,
-        sky_light: bool,
+        skylight: bool,
         add: bool,
     ) -> miners::encoding::decode::Result<Self> {
         Ok(Self {
             blocks: <&ByteArray<4096>>::decode(cursor)?,
             metadata: <&HalfByteArray<2048>>::decode(cursor)?,
             light: <&HalfByteArray<2048>>::decode(cursor)?,
-            sky_light: if sky_light {
+            skylight: if skylight {
                 Some(<&HalfByteArray<2048>>::decode(cursor)?)
             } else {
                 None
@@ -474,7 +520,7 @@ mod tests {
         //TODO: use real data from minecraft
         let bitmask = 0b1011001110110011u16;
         let add = 0b1001001010010010u16;
-        let sky_light = true;
+        let skylight = true;
 
         let mut data = Vec::<u8>::new();
 
@@ -493,7 +539,7 @@ mod tests {
                     data.push(i as u8)
                 }
             }
-            if sky_light {
+            if skylight {
                 for i in 0u16..2048 {
                     data.push(i as u8)
                 }
@@ -504,7 +550,7 @@ mod tests {
         }
 
         let mut chunk =
-            ChunkColumn0::from_reader(&mut std::io::Cursor::new(&data), bitmask, add, sky_light)
+            ChunkColumn0::from_reader(&mut std::io::Cursor::new(&data), bitmask, add, skylight)
                 .unwrap();
         chunk.insert_section(6, false)
     }
