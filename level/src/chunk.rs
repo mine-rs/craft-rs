@@ -46,6 +46,42 @@ mod util {
         *dst = dst.add(N);
         (&mut *p).into()
     }
+
+    macro_rules! getter {
+        ($i:ident, $m:ident, $t:ty) => {
+            pub fn $i(&self) -> &&mut$t {
+                &self.$i
+            }
+    
+            pub fn $m(&mut self) -> &mut $t {
+                self.$i
+            }
+        };
+    }
+
+    macro_rules! opt_getter {
+        ($i:ident, $m:ident, $t:ty) => {
+            pub fn $i(&self) -> Option<&$t> {
+                if let Some(v) = self.$i.as_ref() {
+                    Some(v)
+                } else {
+                    None
+                }
+            }
+    
+            pub fn $m(&mut self) -> Option<&mut $t> {
+                if let Some(v) = self.$i.as_mut() {
+                    Some(v)
+                } else {
+                    None
+                }
+            }
+        };
+    }
+
+    pub(super) use getter;
+    pub(super) use opt_getter;
+    
 }
 
 pub struct ChunkColumn49<'a> {
@@ -458,45 +494,13 @@ impl Encode for ChunkSection0<'_> {
     }
 }
 
-macro_rules! getter {
-    ($i:ident, $m:ident, $t:ty) => {
-        pub fn $i(&self) -> &&mut$t {
-            &self.$i
-        }
-
-        pub fn $m(&mut self) -> &mut $t {
-            self.$i
-        }
-    };
-}
-
-macro_rules! opt_getter {
-    ($i:ident, $m:ident, $t:ty) => {
-        pub fn $i(&self) -> Option<&$t> {
-            if let Some(v) = self.$i.as_ref() {
-                Some(v)
-            } else {
-                None
-            }
-        }
-
-        pub fn $m(&mut self) -> Option<&mut $t> {
-            if let Some(v) = self.$i.as_mut() {
-                Some(v)
-            } else {
-                None
-            }
-        }
-    };
-}
-
 impl ChunkSection0<'_> {
-    getter!(blocks, blocks_mut, ByteArray<4096>);
-    getter!(metadata, metadata_mut, HalfByteArray<2048>);
-    getter!(light, light_mut, HalfByteArray<2048>);
-    opt_getter!(skylight, skylight_mut, HalfByteArray<2048>);
-    opt_getter!(add, add_mut, HalfByteArray<2048>);
-    getter!(biomes, biomes_mut, ByteArray<256>);
+    util::getter!(blocks, blocks_mut, ByteArray<4096>);
+    util::getter!(metadata, metadata_mut, HalfByteArray<2048>);
+    util::getter!(light, light_mut, HalfByteArray<2048>);
+    util::opt_getter!(skylight, skylight_mut, HalfByteArray<2048>);
+    util::opt_getter!(add, add_mut, HalfByteArray<2048>);
+    util::getter!(biomes, biomes_mut, ByteArray<256>);
 }
 
 /// This is only used internally for Decoding
