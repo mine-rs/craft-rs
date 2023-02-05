@@ -194,6 +194,77 @@ impl ChunkColumn0<'_> {
             ],
         }
     }
+    
+    pub fn from_reader(
+        cursor: &mut std::io::Cursor<&[u8]>,
+        bitmask: u16,
+        add: u16,
+        skylight: bool,
+    ) -> miners::encoding::decode::Result<Self> {
+        let mut decode_sections: [Option<ChunkSection0Decode>; 16] = [None; 16];
+
+        let mut size = 0;
+        // create sections according to the bitmask
+        for i in 0u8..16 {
+            let exists: bool = util::bit_at(bitmask, i);
+            if exists {
+                let add: bool = util::bit_at(add, i);
+                decode_sections[i as usize] =
+                    Some(ChunkSection0Decode::from_reader(cursor, skylight, add)?);
+                size += Self::section_size(skylight, add);
+            }
+        }
+
+        let buf = util::create_buffer(size);
+
+        let mut sections: [Option<ChunkSection0>; 16] = [
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None,
+        ];
+
+        // Copy the data over to the buffer.
+        let mut p = buf;
+        for i in 0u8..16 {
+            if let Some(section) = decode_sections[i as usize] {
+                let section = ChunkSection0 {
+                    // SAFETY: This is fine because we know dst (p) was properly allocated and there are no references to it.
+                    // (a pointer is not a reference)
+                    blocks: unsafe { util::new_section_field(&mut p, section.blocks) },
+                    // SAFETY: See safety comment for `blocks`
+                    metadata: unsafe { util::new_section_field(&mut p, section.metadata) },
+                    // SAFETY: See safety comment for `blocks`
+                    light: unsafe { util::new_section_field(&mut p, section.light) },
+                    skylight: if let Some(v) = section.skylight {
+                        Some(
+                            // SAFETY: See safety comment for `blocks`
+                            unsafe { util::new_section_field(&mut p, v) },
+                        )
+                    } else {
+                        None
+                    },
+                    add: if let Some(v) = section.add {
+                        Some(
+                            // SAFETY: See safety comment for `blocks`
+                            unsafe { util::new_section_field(&mut p, v) },
+                        )
+                    } else {
+                        None
+                    },
+                    // SAFETY: See safety comment for `blocks`
+                    biomes: unsafe { util::new_section_field(&mut p, section.biomes) },
+                };
+                sections[i as usize] = Some(section);
+            }
+        }
+        Ok(Self {
+            // SAFETY: This is fine because we know data is not null
+            buf: unsafe { Some(NonNull::new_unchecked(buf)) },
+            size,
+            skylight,
+            // Safety: The compiler thinks `sections` is bound by the lifetime of the cursor slice, but it isn't because we copied the data over to a new buffer.
+            sections: unsafe { std::mem::transmute(sections) },
+        })
+    }
 
     /// Creates a new section and zero-initialises all of the buffers
     pub fn insert_section(&mut self, section: usize, add: bool) {
@@ -349,77 +420,6 @@ impl<'a> ChunkColumn0<'a> {
             None
         }
     }
-
-    pub fn from_reader(
-        cursor: &mut std::io::Cursor<&[u8]>,
-        bitmask: u16,
-        add: u16,
-        skylight: bool,
-    ) -> miners::encoding::decode::Result<Self> {
-        let mut decode_sections: [Option<ChunkSection0Decode>; 16] = [None; 16];
-
-        let mut size = 0;
-        // create sections according to the bitmask
-        for i in 0u8..16 {
-            let exists: bool = util::bit_at(bitmask, i);
-            if exists {
-                let add: bool = util::bit_at(add, i);
-                decode_sections[i as usize] =
-                    Some(ChunkSection0Decode::from_reader(cursor, skylight, add)?);
-                size += Self::section_size(skylight, add);
-            }
-        }
-
-        let buf = util::create_buffer(size);
-
-        let mut sections: [Option<ChunkSection0>; 16] = [
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None,
-        ];
-
-        // Copy the data over to the buffer.
-        let mut p = buf;
-        for i in 0u8..16 {
-            if let Some(section) = decode_sections[i as usize] {
-                let section = ChunkSection0 {
-                    // SAFETY: This is fine because we know dst (p) was properly allocated and there are no references to it.
-                    // (a pointer is not a reference)
-                    blocks: unsafe { util::new_section_field(&mut p, section.blocks) },
-                    // SAFETY: See safety comment for `blocks`
-                    metadata: unsafe { util::new_section_field(&mut p, section.metadata) },
-                    // SAFETY: See safety comment for `blocks`
-                    light: unsafe { util::new_section_field(&mut p, section.light) },
-                    skylight: if let Some(v) = section.skylight {
-                        Some(
-                            // SAFETY: See safety comment for `blocks`
-                            unsafe { util::new_section_field(&mut p, v) },
-                        )
-                    } else {
-                        None
-                    },
-                    add: if let Some(v) = section.add {
-                        Some(
-                            // SAFETY: See safety comment for `blocks`
-                            unsafe { util::new_section_field(&mut p, v) },
-                        )
-                    } else {
-                        None
-                    },
-                    // SAFETY: See safety comment for `blocks`
-                    biomes: unsafe { util::new_section_field(&mut p, section.biomes) },
-                };
-                sections[i as usize] = Some(section);
-            }
-        }
-        Ok(Self {
-            // SAFETY: This is fine because we know data is not null
-            buf: unsafe { Some(NonNull::new_unchecked(buf)) },
-            size,
-            skylight,
-            // Safety: The compiler thinks `sections` is bound by the lifetime of the cursor slice, but it isn't because we copied the data over to a new buffer.
-            sections: unsafe { std::mem::transmute(sections) },
-        })
-    }
 }
 
 impl<'a> Drop for ChunkColumn0<'a> {
@@ -472,8 +472,12 @@ macro_rules! getter {
 
 macro_rules! opt_getter {
     ($i:ident, $m:ident, $t:ty) => {
-        pub fn $i(&self) -> &Option<&mut$t> {
-            &self.$i
+        pub fn $i(&self) -> Option<&$t> {
+            if let Some(v) = self.$i.as_ref() {
+                Some(v)
+            } else {
+                None
+            }
         }
 
         pub fn $m(&mut self) -> Option<&mut $t> {
