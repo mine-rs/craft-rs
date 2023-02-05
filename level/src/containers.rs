@@ -79,7 +79,6 @@ impl<'dec, const N: usize> Decode<'dec> for &BlockArray49<N> {
     }
 }
 
-
 // SAFETY: This is fine because we uphold all of the invariants
 unsafe impl<const N: usize> ReadContainer<Block49> for BlockArray49<N> {
     const N: usize = N;
