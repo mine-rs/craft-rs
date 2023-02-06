@@ -12,10 +12,10 @@ mod util {
     }
 
     /// # Safety
-    /// dst should be allocated properly, initialised, and no other references should point to it
-    pub unsafe fn assign_ref<'a, const N: usize, T: From<&'a mut [u8; N]>>(dst: &mut *mut u8) -> T {
-        let p = dst.cast() as *mut [u8; N];
-        *dst = dst.add(N);
+    /// `src` should be allocated properly, initialised, and no other references should point to it
+    pub unsafe fn assign_ref<'a, const N: usize, T: From<&'a mut [u8; N]>>(src: &mut *mut u8) -> T {
+        let p = src.cast() as *mut [u8; N];
+        *src = src.add(N);
         (&mut *p).into()
     }
 
@@ -79,8 +79,54 @@ mod util {
         };
     }
 
+    /// Used to generate reallocate functions for the 0 and 49 protocol versions.
+    macro_rules! reallocate_fn {
+        ($t:ty, | $self:ident, $p:ident, $section:ident | $e:expr) => {
+            /// Reallocates the internal buffer extending it with `extend` and returning a reference to the part of the buffer that was just added.
+            pub fn reallocate<'a>(&'a mut $self, extend: usize) -> &'a mut [MaybeUninit<u8>] {
+                assert!(extend != 0);
+
+                let new = $crate::chunk::util::create_buffer($self.size + extend);
+
+                let mut sections: [Option<$t>; 16] = [
+                    None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+                    None, None,
+                ];
+
+                if let Some(buf) = $self.buf {
+                    // SAFETY: This is fine because we know self.buf is initialised and new and self.buf don't overlap.
+                    unsafe { std::ptr::copy_nonoverlapping(buf.as_ptr(), new, $self.size) };
+                    let mut $p = new;
+
+                    for (i, section) in $self.sections.iter().enumerate() {
+                        if let Some($section) = section {
+                            let section = $e;
+                            sections[i] = Some(section)
+                        }
+                    }
+                }
+                
+                let this = Self {
+                    // SAFETY: This is safe because we know new isn't a null pointer.
+                    buf: unsafe { Some(NonNull::new_unchecked(new)) },
+                    size: $self.size + extend,
+                    skylight: $self.skylight,
+                    sections,
+                };
+
+                let old_size = $self.size;
+                *$self = this;
+        
+                // SAFETY: This is sound because we're using `MaybeUninit<u8>` and we know the memory has been allocated.
+                unsafe { std::slice::from_raw_parts_mut(new.add(old_size).cast(), extend) }
+
+            }
+        };
+    }
+
     pub(super) use getter;
     pub(super) use opt_getter;
+    pub(super) use reallocate_fn;
     
 }
 
@@ -89,6 +135,10 @@ pub struct ChunkColumn49<'a> {
     size: usize,
     skylight: bool,
     sections: [Option<ChunkSection49<'a>>; 16],
+}
+
+impl ChunkColumn49<'_> {
+    util::reallocate_fn!(ChunkSection49, |self, p, _section | {unsafe { ChunkSection49::new(&mut p, self.skylight) } });
 }
 
 impl ChunkColumn49<'_> {
@@ -155,6 +205,39 @@ pub struct ChunkSection49<'a> {
     light: &'a mut HalfByteArray<2048>,
     skylight: Option<&'a mut HalfByteArray<2048>>,
     biomes: &'a mut ByteArray<256>,
+}
+
+impl ChunkSection49<'_> {
+    pub unsafe fn new(p: &mut *mut u8, skylight: bool) -> Self {
+        ChunkSection49 { blocks: util::assign_ref(p), light: util::assign_ref(p), skylight: if skylight {Some(util::assign_ref(p))} else {None}, biomes: util::assign_ref(p) }
+    }
+    /*
+    unsafe fn new(p: &mut *mut u8, skylight: bool, add: bool) -> Self {
+        Self {
+            blocks: util::assign_ref(p),
+            metadata: util::assign_ref(p) ,
+            light: util::assign_ref(p) ,
+            skylight: if skylight {
+                Some(util::assign_ref(p))
+            } else {
+                None
+            },
+            add: if add {
+                Some(util::assign_ref(p))
+            } else {
+                None
+            },
+            biomes: util::assign_ref(p) ,
+        }
+    }
+    */
+}
+
+impl<'a> ChunkSection49<'a> {
+    util::getter!(blocks, blocks_mut, BlockArray49<4096>);
+    util::getter!(light, light_mut, HalfByteArray<2048>);
+    util::opt_getter!(skylight, skylight_mut, HalfByteArray<2048>);
+    util::getter!(biomes, biomes_mut, ByteArray<256>);
 }
 
 #[repr(C)]
@@ -341,67 +424,7 @@ impl ChunkColumn0<'_> {
         }
     }
 
-    /// Reallocates the internal buffer extending it with `extend` and returning a reference to the part of the buffer that was just added.
-    pub fn reallocate<'a>(&'a mut self, extend: usize) -> &'a mut [MaybeUninit<u8>] {
-        assert!(extend != 0);
-
-        let mut vec = Vec::<u8>::with_capacity(self.size + extend);
-        let new = vec.as_mut_ptr();
-        std::mem::forget(vec);
-
-        let mut sections: [Option<ChunkSection0>; 16] = [
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None,
-        ];
-
-        if let Some(buf) = self.buf {
-            // SAFETY: This is fine because we know self.buf is initialised and new and self.buf don't overlap.
-            unsafe { std::ptr::copy_nonoverlapping(buf.as_ptr(), new, self.size) };
-            let mut p = new;
-
-            for i in 0..16 {
-                if let Some(old_section) = &self.sections[i] {
-                    let section = Some(ChunkSection0 {
-                        // SAFETY: We know dst is allocated, initialised and no other references point to it so this is fine.
-                        blocks: unsafe { util::assign_ref(&mut p) },
-                        // SAFETY: See safety comment for `blocks`.
-                        metadata: unsafe { util::assign_ref(&mut p) },
-                        // SAFETY: See safety comment for `blocks`.
-                        light: unsafe { util::assign_ref(&mut p) },
-                        // SAFETY: See safety comment for `blocks`.
-                        skylight: if old_section.skylight.is_some() {
-                            // SAFETY: See safety comment for `blocks`.
-                            Some(unsafe { util::assign_ref(&mut p) })
-                        } else {
-                            None
-                        },
-                        add: if old_section.add.is_some() {
-                            // SAFETY: See safety comment for `blocks`.
-                            Some(unsafe { util::assign_ref(&mut p) })
-                        } else {
-                            None
-                        },
-                        // SAFETY: See safety comment for `blocks`.
-                        biomes: unsafe { util::assign_ref(&mut p) },
-                    });
-                    sections[i] = section;
-                }
-            }
-        }
-        let this = Self {
-            // SAFETY: This is safe because we know new isn't a null pointer.
-            buf: unsafe { Some(NonNull::new_unchecked(new)) },
-            size: self.size + extend,
-            skylight: self.skylight,
-            sections,
-        };
-
-        let old_size = self.size;
-        *self = this;
-
-        // SAFETY: This is sound because we're using `MaybeUninit<u8>` and we know the memory has been allocated.
-        unsafe { std::slice::from_raw_parts_mut(new.add(old_size).cast(), extend) }
-    }
+    util::reallocate_fn!(ChunkSection0, |self, p, section| unsafe { ChunkSection0::new(&mut p, self.skylight, section.add.is_some()) });
 
     /// Returns a bool indicating if this column stores sky light data.
     pub fn skylight(&self) -> bool {
@@ -476,6 +499,27 @@ pub struct ChunkSection0<'a> {
     skylight: Option<&'a mut HalfByteArray<2048>>,
     add: Option<&'a mut HalfByteArray<2048>>,
     biomes: &'a mut ByteArray<256>,
+}
+
+impl ChunkSection0<'_> {
+    unsafe fn new(p: &mut *mut u8, skylight: bool, add: bool) -> Self {
+        Self {
+            blocks: util::assign_ref(p),
+            metadata: util::assign_ref(p) ,
+            light: util::assign_ref(p) ,
+            skylight: if skylight {
+                Some(util::assign_ref(p))
+            } else {
+                None
+            },
+            add: if add {
+                Some(util::assign_ref(p))
+            } else {
+                None
+            },
+            biomes: util::assign_ref(p) ,
+        }
+    }
 }
 
 impl Encode for ChunkSection0<'_> {
