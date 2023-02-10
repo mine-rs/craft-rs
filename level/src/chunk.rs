@@ -177,17 +177,45 @@ pub struct ChunkColumn49<'a> {
     sections: [Option<ChunkSection49<'a>>; 16],
 }
 
-impl ChunkColumn49<'_> {
-    util::reallocate_fn!(ChunkSection49, |self, p, _section| {
-        // Safety: This is safe because `p` is properly initialised and allocated inside of the macro.
-        unsafe { ChunkSection49::new(&mut p, self.skylight) }
-    });
+impl<'a> ChunkColumn49<'a> {
+    /// Gets a reference to the section if it exists.
+    pub fn section(&self, section: usize) -> Option<&ChunkSection49<'a>> {
+        if let Some(ref section) = self.sections[section] {
+            Some(section)
+        } else {
+            None
+        }
+    }
+
+    /// Gets a mutable reference to the section if it exists.
+    pub fn section_mut(&mut self, section: usize) -> Option<&mut ChunkSection49<'a>> {
+        if let Some(ref mut section) = self.sections[section] {
+            Some(section)
+        } else {
+            None
+        }
+    }
 }
 
 impl ChunkColumn49<'_> {
     const fn section_size(skylight: bool) -> usize {
         4096 + 1024 + if skylight { 1024 } else { 0 } + 256
     }
+
+    pub fn insert_section(&mut self, i: usize, skylight: bool) {
+        assert!(self.sections[i].is_none());
+        let size = Self::section_size(skylight);
+        let mut p: *mut u8 = self.reallocate(size).as_mut_ptr().cast();
+        // Safety: This is safe because we know p was allocated for size.
+        unsafe { p.write_bytes(0, size) }
+        // Safety: This is safe because p was allocated and initialised correctly.
+        self.sections[i] = unsafe { Some(ChunkSection49::new(&mut p, skylight)) };
+    }
+
+    util::reallocate_fn!(ChunkSection49, |self, p, _section| {
+        // Safety: This is safe because `p` is properly initialised and allocated inside of the macro.
+        unsafe { ChunkSection49::new(&mut p, self.skylight) }
+    });
 
     util::from_reader_fn!(ChunkSection49, |p, skylight| {
         // Safety: This is safe because `p` is properly initialised and allocated inside of the macro.
