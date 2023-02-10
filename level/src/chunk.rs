@@ -27,26 +27,6 @@ mod util {
         data
     }
 
-    // TODO: Come up with a better name.
-    /// This is a helper method for constructing section fields in the 0 and 49 protocol versions.
-    /// # Safety
-    /// `dst` should be allocated properly and no other references should point to it.
-    #[inline]
-    pub unsafe fn new_section_field<
-        'a,
-        const N: usize,
-        T: Into<&'a [u8; N]>,
-        U: From<&'a mut [u8; N]>,
-    >(
-        dst: &mut *mut u8,
-        src: T,
-    ) -> U {
-        let p = dst.cast() as *mut [u8; N];
-        p.copy_from_nonoverlapping(Into::<&[u8; N]>::into(src), 1);
-        *dst = dst.add(N);
-        (&mut *p).into()
-    }
-
     macro_rules! getter {
         ($i:ident, $m:ident, $t:ty) => {
             pub fn $i(&self) -> &&mut$t {
@@ -81,14 +61,14 @@ mod util {
 
     /// Used to generate reallocate functions for the 0 and 49 protocol versions.
     macro_rules! reallocate_fn {
-        ($t:ty, | $self:ident, $p:ident, $section:ident | $e:expr) => {
+        ($section_t:ty, | $self:ident, $p:ident, $section:ident | $e:expr) => {
             /// Reallocates the internal buffer extending it with `extend` and returning a reference to the part of the buffer that was just added.
             pub fn reallocate<'a>(&'a mut $self, extend: usize) -> &'a mut [MaybeUninit<u8>] {
                 assert!(extend != 0);
 
                 let new = $crate::chunk::util::create_buffer($self.size + extend);
 
-                let mut sections: [Option<$t>; 16] = [
+                let mut sections: [Option<$section_t>; 16] = [
                     None, None, None, None, None, None, None, None, None, None, None, None, None, None,
                     None, None,
                 ];
@@ -125,44 +105,58 @@ mod util {
     }
 
     macro_rules! from_reader_fn {
-        ($dec_t:ty, $section_t:ty, | $section:ident, $p:ident | $e:expr $(, $add:ident, $t:ty)?) => {
+        ($section:ty, | $p:ident, $skylight:ident | $e:expr $(, $add:ident, $t:ty)?) => {
             pub fn from_reader(
                 cursor: &mut std::io::Cursor<&[u8]>,
-                skylight: bool,
+                $skylight: bool,
                 bitmask: u16,
                 $($add: $t)?
             ) -> miners::encoding::decode::Result<Self> {
-                let mut decode_sections: [Option<$dec_t>; 16] = [None; 16];
                 let mut size = 0;
-                for (i, section) in decode_sections.iter_mut().enumerate() {
-                    let exists: bool = $crate::chunk::util::bit_at(bitmask, i as u8);
+                for i in 0u8..16  {
+                    let exists: bool = $crate::chunk::util::bit_at(bitmask, i);
                     if exists {
-                        $(let $add: bool = util::bit_at($add, i as u8);)?
-                        size += Self::section_size(skylight, $($add)?);
-                        *section = Some(<$dec_t>::from_reader(cursor, skylight, $($add)?)?)
+                        $(let $add: bool = util::bit_at($add, i);)?
+                        size += Self::section_size($skylight, $($add)?);
                     }
                 }
 
-                let buf = util::create_buffer(size);
+                let data = {
+                    let pos = cursor.position() as usize;
+                    let slice = cursor
+                        .get_ref()
+                        .get(pos..pos + size as usize)
+                        .ok_or(miners::encoding::decode::Error::UnexpectedEndOfSlice)?;
+                    cursor.set_position((pos + size) as u64);
+                    debug_assert_eq!(slice.len(), size);
+                    slice
+                };
 
-                let mut sections: [Option<$section_t>; 16] = [
+                let buf = util::create_buffer(size);
+                // Copy the data over to the buffer
+
+                // Safety: This is safe because the buf is properly allocated, and data is properly initialised for the amount of bytes copied over.
+                unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), buf, size) };
+
+                let mut sections: [Option<$section>; 16] = [
                     None, None, None, None, None, None, None, None, None, None, None, None, None, None,
                     None, None,
                 ];
-                // Copy the data over to the buffer
                 let mut $p = buf;
-                for (i, section) in decode_sections.iter().enumerate() {
-                    if let Some($section) = section {
+                for i in 0u8..16 {
+                    let exists: bool = $crate::chunk::util::bit_at(bitmask, i);
+                    if exists {
+                        $(let $add: bool = util::bit_at($add, i);)?
                         // Safety: This is safe because p is properly allocated and there are no other references pointing to it.
                         let section = $e;
-                        sections[i] = Some(section)
+                        sections[i as usize] = Some(section)
                     }
                 }
                 Ok(Self {
                     // Safety: This is safe because buf isn't a null pointer.
                     buf: unsafe { Some(NonNull::new_unchecked(buf)) },
                     size,
-                    skylight,
+                    $skylight,
                     // Safety: The compiler thinks `sections` is bound by the lifetime of the cursor slice, but it isn't because we copied the data over to a new buffer.  
                     sections: unsafe { std::mem::transmute(sections) },
                 })
@@ -184,7 +178,7 @@ pub struct ChunkColumn49<'a> {
 }
 
 impl ChunkColumn49<'_> {
-    util::reallocate_fn!(ChunkSection49, |self, p, _section | {unsafe { ChunkSection49::from_init_p(&mut p, self.skylight) } });
+    util::reallocate_fn!(ChunkSection49, |self, p, _section | {unsafe { ChunkSection49::new(&mut p, self.skylight) } });
 }
 
 impl ChunkColumn49<'_> {
@@ -192,7 +186,7 @@ impl ChunkColumn49<'_> {
         4096 + 1024 + if skylight { 1024 } else { 0 } + 256
     }
 
-    util::from_reader_fn!(ChunkSection49Decode, ChunkSection49, | section, p | unsafe { ChunkSection49::from_uninit_p(&mut p, section) });
+    util::from_reader_fn!(ChunkSection49, | p, skylight | unsafe { ChunkSection49::new(&mut p, skylight) });
 }
 
 #[repr(C)]
@@ -204,42 +198,9 @@ pub struct ChunkSection49<'a> {
 }
 
 impl ChunkSection49<'_> {
-    pub(self) unsafe fn from_init_p(p: &mut *mut u8, skylight: bool) -> Self {
+    pub(self) unsafe fn new(p: &mut *mut u8, skylight: bool) -> Self {
         ChunkSection49 { blocks: util::assign_ref(p), light: util::assign_ref(p), skylight: if skylight {Some(util::assign_ref(p))} else {None}, biomes: util::assign_ref(p) }
     }
-
-    pub(self) unsafe fn from_uninit_p<'a>(p: &mut *mut u8, section: &ChunkSection49Decode<'a>) -> ChunkSection49<'a> {
-        ChunkSection49 {
-            blocks: util::new_section_field(p, section.blocks),
-            light: util::new_section_field( p, section.light),
-            skylight: if let Some(skylight) = section.skylight {
-                Some(util::new_section_field(p, skylight))
-            } else {
-                None
-            },
-            biomes: util::new_section_field(p, section.biomes),
-        }
-    }
-    /*
-    unsafe fn new(p: &mut *mut u8, skylight: bool, add: bool) -> Self {
-        Self {
-            blocks: util::assign_ref(p),
-            metadata: util::assign_ref(p) ,
-            light: util::assign_ref(p) ,
-            skylight: if skylight {
-                Some(util::assign_ref(p))
-            } else {
-                None
-            },
-            add: if add {
-                Some(util::assign_ref(p))
-            } else {
-                None
-            },
-            biomes: util::assign_ref(p) ,
-        }
-    }
-    */
 }
 
 impl<'a> ChunkSection49<'a> {
@@ -247,33 +208,6 @@ impl<'a> ChunkSection49<'a> {
     util::getter!(light, light_mut, HalfByteArray<2048>);
     util::opt_getter!(skylight, skylight_mut, HalfByteArray<2048>);
     util::getter!(biomes, biomes_mut, ByteArray<256>);
-}
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct ChunkSection49Decode<'a> {
-    blocks: &'a BlockArray49<4096>,
-    light: &'a HalfByteArray<2048>,
-    skylight: Option<&'a HalfByteArray<2048>>,
-    biomes: &'a ByteArray<256>,
-}
-
-impl<'a> ChunkSection49Decode<'a> {
-    pub fn from_reader(
-        cursor: &mut std::io::Cursor<&'a [u8]>,
-        skylight: bool,
-    ) -> miners::encoding::decode::Result<Self> {
-        Ok(Self {
-            blocks: <&BlockArray49<4096>>::decode(cursor)?,
-            light: <&HalfByteArray<2048>>::decode(cursor)?,
-            skylight: if skylight {
-                Some(<&HalfByteArray<2048>>::decode(cursor)?)
-            } else {
-                None
-            },
-            biomes: <&ByteArray<256>>::decode(cursor)?,
-        })
-    }
 }
 
 /// A chunk column, not including heightmaps
@@ -323,7 +257,7 @@ impl ChunkColumn0<'_> {
         }
     }
     
-    util::from_reader_fn!(ChunkSection0Decode, ChunkSection0, | section, p | unsafe { ChunkSection0::from_uninit_p(&mut p, section) }, add, u16);
+    util::from_reader_fn!(ChunkSection0, | p, skylight | unsafe { ChunkSection0::new(&mut p, skylight, add) }, add, u16);
 
     /// Creates a new section and zero-initialises all of the buffers
     pub fn insert_section(&mut self, section: usize, add: bool) {
@@ -364,7 +298,7 @@ impl ChunkColumn0<'_> {
         }
     }
 
-    util::reallocate_fn!(ChunkSection0, |self, p, section| unsafe { ChunkSection0::from_init_p(&mut p, self.skylight, section.add.is_some()) });
+    util::reallocate_fn!(ChunkSection0, |self, p, section| unsafe { ChunkSection0::new(&mut p, self.skylight, section.add.is_some()) });
 
     /// Returns a bool indicating if this column stores sky light data.
     pub fn skylight(&self) -> bool {
@@ -442,7 +376,7 @@ pub struct ChunkSection0<'a> {
 }
 
 impl ChunkSection0<'_> {
-    unsafe fn from_init_p(p: &mut *mut u8, skylight: bool, add: bool) -> Self {
+    unsafe fn new(p: &mut *mut u8, skylight: bool, add: bool) -> Self {
         Self {
             blocks: util::assign_ref(p),
             metadata: util::assign_ref(p) ,
@@ -458,29 +392,6 @@ impl ChunkSection0<'_> {
                 None
             },
             biomes: util::assign_ref(p) ,
-        }
-    }
-    
-    unsafe fn from_uninit_p<'a>(p: &mut *mut u8, section: &ChunkSection0Decode<'a>) -> ChunkSection0<'a> {
-        ChunkSection0 {
-            blocks: util::new_section_field(p, section.blocks),
-            metadata: util::new_section_field(p, section.metadata),
-            light: util::new_section_field(p, section.light),
-            skylight: if let Some(v) = section.skylight {
-                Some(
-                    util::new_section_field(p, v),
-                )
-            } else {
-                None
-            },
-            add: if let Some(v) = section.add {
-                Some(
-                    util::new_section_field(p, v),
-                )
-            } else {
-                None
-            },
-            biomes: util::new_section_field(p, section.biomes),
         }
     }
 }
@@ -508,43 +419,6 @@ impl ChunkSection0<'_> {
     util::opt_getter!(skylight, skylight_mut, HalfByteArray<2048>);
     util::opt_getter!(add, add_mut, HalfByteArray<2048>);
     util::getter!(biomes, biomes_mut, ByteArray<256>);
-}
-
-/// This is only used internally for Decoding
-#[derive(Copy, Clone)]
-#[repr(C)]
-struct ChunkSection0Decode<'a> {
-    pub blocks: &'a ByteArray<4096>,
-    pub metadata: &'a HalfByteArray<2048>,
-    pub light: &'a HalfByteArray<2048>,
-    pub skylight: Option<&'a HalfByteArray<2048>>,
-    pub add: Option<&'a HalfByteArray<2048>>,
-    pub biomes: &'a ByteArray<256>,
-}
-
-impl<'a> ChunkSection0Decode<'a> {
-    pub fn from_reader(
-        cursor: &mut std::io::Cursor<&'a [u8]>,
-        skylight: bool,
-        add: bool,
-    ) -> miners::encoding::decode::Result<Self> {
-        Ok(Self {
-            blocks: <&ByteArray<4096>>::decode(cursor)?,
-            metadata: <&HalfByteArray<2048>>::decode(cursor)?,
-            light: <&HalfByteArray<2048>>::decode(cursor)?,
-            skylight: if skylight {
-                Some(<&HalfByteArray<2048>>::decode(cursor)?)
-            } else {
-                None
-            },
-            add: if add {
-                Some(<&HalfByteArray<2048>>::decode(cursor)?)
-            } else {
-                None
-            },
-            biomes: <&ByteArray<256>>::decode(cursor)?,
-        })
-    }
 }
 
 /// A 16 * 16 * 16 section of a chunk.
