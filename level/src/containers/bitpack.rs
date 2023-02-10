@@ -84,8 +84,7 @@ impl<const N: usize> PackedBits<N, NativeEndian> {
         let vpe = 64 / bits; // values per element
         let len = N / vpe;
 
-        let mut data = Vec::<u64>::with_capacity(len);
-        data.resize(len, 0);
+        let mut data = vec![0u64; len];
 
         // SAFETY: This is fine because a u64 is 8 bytes
         let slice = unsafe {
@@ -186,8 +185,8 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
     #[allow(dead_code)]
     pub fn with_data_unpacked(bits: usize, data: &[u32]) -> Self {
         let mut this = Self::new(bits);
-        for i in 0..data.len() {
-            this.set(i, data[i]);
+        for (i, v) in data.iter().enumerate() {
+            this.set(i, *v);
         }
         this
     }
@@ -215,7 +214,7 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
     pub unsafe fn get_unchecked(&self, i: usize) -> u32 {
         let (vi, bits, bo) = self.calculate_index(i);
         let num = self.data.get_unchecked(vi).to_ne();
-        (((num & bits) << bo) as u64).rotate_left(self.bits as u32) as u32
+        ((num & bits) << bo).rotate_left(self.bits as u32) as u32
     }
 
     #[inline]
@@ -228,6 +227,8 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
     }
 
     #[inline]
+    /// # Safety
+    /// This is safe as long as `i` is within bounds.
     pub unsafe fn set_unchecked(&mut self, i: usize, v: u32) {
         let (vi, bits, bo) = self.calculate_index(i);
         let element = self.data.get_unchecked_mut(vi);
@@ -266,7 +267,7 @@ impl<const N: usize, B: byteorder::ByteOrderedU64> PackedBits<N, B> {
     }
 
     fn calculate_mask(bits: usize) -> u64 {
-        ((((1_u64) << bits) - 1) as u64).rotate_right(bits as u32)
+        (((1_u64) << bits) - 1).rotate_right(bits as u32)
     }
 
     pub fn rlen(&self) -> usize {

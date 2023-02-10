@@ -5,7 +5,8 @@ use super::bitpack::{
     PackedBits,
 };
 use std::collections::BTreeMap;
-
+/// # Safety
+/// This trait is safe to implement as long as you don't override the set/get methods without bounds checking
 pub unsafe trait PaletteContainer {
     const N: usize;
     fn new(value: u16) -> Self;

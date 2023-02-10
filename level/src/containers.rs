@@ -28,7 +28,7 @@ impl<const N: usize> AsRef<[Block49]> for BlockArray49<N> {
     }
 }
 
-impl<'a, const N: usize> AsRef<[u8]> for BlockArray49<N> {
+impl<const N: usize> AsRef<[u8]> for BlockArray49<N> {
     fn as_ref(&self) -> &[u8] {
         // SAFETY: This is safe because BlockArray49 is an array of u16's which means the size in bytes is N * 2.
         unsafe { std::slice::from_raw_parts(self as *const BlockArray49<N> as *const u8, N * 2) }
@@ -170,7 +170,7 @@ fn decode_slice<'dec, const N: usize>(
     let pos = cursor.position() as usize;
     let slice = cursor
         .get_ref()
-        .get(pos..pos + N as usize)
+        .get(pos..pos + N)
         .ok_or(miners::encoding::decode::Error::UnexpectedEndOfSlice)?;
     cursor.set_position((pos + N) as u64);
     debug_assert_eq!(slice.len(), N);
@@ -257,13 +257,15 @@ unsafe impl<const RLEN: usize> WriteContainer<u8> for HalfByteArray<RLEN> {
     unsafe fn set_unchecked(&mut self, i: usize, v: u8) {
         let byte = self.0.get_unchecked_mut(i / 2);
         if i % 2 == 0 {
-            *byte = *byte & (v << 4)
+            *byte &= v << 4
         } else {
-            *byte = *byte & v
+            *byte &= v
         }
     }
 }
 
+/// # Safety
+/// This trait is safe to implement as long as you don't override the get method without bounds checking
 pub unsafe trait ReadContainer<V> {
     const N: usize;
 
@@ -280,6 +282,8 @@ pub unsafe trait ReadContainer<V> {
     unsafe fn get_unchecked(&self, i: usize) -> V;
 }
 
+/// # Safety
+/// This trait is safe to implement as long as you don't override the set method without bounds checking
 pub unsafe trait WriteContainer<V>: ReadContainer<V> {
     fn set(&mut self, i: usize, v: V) {
         if i >= Self::N {

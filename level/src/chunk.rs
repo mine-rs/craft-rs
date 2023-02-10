@@ -32,7 +32,7 @@ mod util {
             pub fn $i(&self) -> &&mut$t {
                 &self.$i
             }
-    
+
             pub fn $m(&mut self) -> &mut $t {
                 self.$i
             }
@@ -48,7 +48,7 @@ mod util {
                     None
                 }
             }
-    
+
             pub fn $m(&mut self) -> Option<&mut $t> {
                 if let Some(v) = self.$i.as_mut() {
                     Some(v)
@@ -85,7 +85,7 @@ mod util {
                         }
                     }
                 }
-                
+
                 let this = Self {
                     // SAFETY: This is safe because we know new isn't a null pointer.
                     buf: unsafe { Some(NonNull::new_unchecked(new)) },
@@ -96,7 +96,7 @@ mod util {
 
                 let old_size = $self.size;
                 *$self = this;
-        
+
                 // SAFETY: This is sound because we're using `MaybeUninit<u8>` and we know the memory has been allocated.
                 unsafe { std::slice::from_raw_parts_mut(new.add(old_size).cast(), extend) }
 
@@ -157,17 +157,17 @@ mod util {
                     buf: unsafe { Some(NonNull::new_unchecked(buf)) },
                     size,
                     $skylight,
-                    // Safety: The compiler thinks `sections` is bound by the lifetime of the cursor slice, but it isn't because we copied the data over to a new buffer.  
+                    // Safety: The compiler thinks `sections` is bound by the lifetime of the cursor slice, but it isn't because we copied the data over to a new buffer.
                     sections: unsafe { std::mem::transmute(sections) },
                 })
             }
         };
     }
 
+    pub(super) use from_reader_fn;
     pub(super) use getter;
     pub(super) use opt_getter;
     pub(super) use reallocate_fn;
-    pub(super) use from_reader_fn;    
 }
 
 pub struct ChunkColumn49<'a> {
@@ -178,7 +178,10 @@ pub struct ChunkColumn49<'a> {
 }
 
 impl ChunkColumn49<'_> {
-    util::reallocate_fn!(ChunkSection49, |self, p, _section | {unsafe { ChunkSection49::new(&mut p, self.skylight) } });
+    util::reallocate_fn!(ChunkSection49, |self, p, _section| {
+        // Safety: This is safe because `p` is properly initialised and allocated inside of the macro.
+        unsafe { ChunkSection49::new(&mut p, self.skylight) }
+    });
 }
 
 impl ChunkColumn49<'_> {
@@ -186,7 +189,10 @@ impl ChunkColumn49<'_> {
         4096 + 1024 + if skylight { 1024 } else { 0 } + 256
     }
 
-    util::from_reader_fn!(ChunkSection49, | p, skylight | unsafe { ChunkSection49::new(&mut p, skylight) });
+    util::from_reader_fn!(ChunkSection49, |p, skylight| {
+        // Safety: This is safe because `p` is properly initialised and allocated inside of the macro.
+        unsafe { ChunkSection49::new(&mut p, skylight) }
+    });
 }
 
 #[repr(C)]
@@ -199,7 +205,16 @@ pub struct ChunkSection49<'a> {
 
 impl ChunkSection49<'_> {
     pub(self) unsafe fn new(p: &mut *mut u8, skylight: bool) -> Self {
-        ChunkSection49 { blocks: util::assign_ref(p), light: util::assign_ref(p), skylight: if skylight {Some(util::assign_ref(p))} else {None}, biomes: util::assign_ref(p) }
+        ChunkSection49 {
+            blocks: util::assign_ref(p),
+            light: util::assign_ref(p),
+            skylight: if skylight {
+                Some(util::assign_ref(p))
+            } else {
+                None
+            },
+            biomes: util::assign_ref(p),
+        }
     }
 }
 
@@ -226,11 +241,9 @@ impl Encode for ChunkColumn0<'_> {
     // This implementation only writes the chunk data, not the metadata.
     fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
         let mut compression = flate2::write::ZlibEncoder::new(writer, flate2::Compression::fast());
-        for section in &self.sections {
-            if let Some(section) = section {
-                // TODO: add a way for the user to specify the compression level.
-                section.encode(&mut compression)?;
-            }
+        for section in self.sections.iter().flatten() {
+            // TODO: add a way for the user to specify the compression level.
+            section.encode(&mut compression)?;
         }
         compression.flush_finish()?;
         Ok(())
@@ -256,8 +269,16 @@ impl ChunkColumn0<'_> {
             ],
         }
     }
-    
-    util::from_reader_fn!(ChunkSection0, | p, skylight | unsafe { ChunkSection0::new(&mut p, skylight, add) }, add, u16);
+
+    util::from_reader_fn!(
+        ChunkSection0,
+        |p, skylight| {
+            // Safety: This is safe because `p` is properly initialised and allocated inside of the macro.
+            unsafe { ChunkSection0::new(&mut p, skylight, add) }
+        },
+        add,
+        u16
+    );
 
     /// Creates a new section and zero-initialises all of the buffers
     pub fn insert_section(&mut self, section: usize, add: bool) {
@@ -267,22 +288,8 @@ impl ChunkColumn0<'_> {
         // zero-initialise the buffer
         // SAFETY: This is fine because we know `p` has been allocated for `size`.
         unsafe { p.write_bytes(0, size) };
-        self.sections[section] = Some(ChunkSection0 {
-            blocks: unsafe { util::assign_ref(&mut p) },
-            metadata: unsafe { util::assign_ref(&mut p) },
-            light: unsafe { util::assign_ref(&mut p) },
-            skylight: if self.skylight {
-                Some(unsafe { util::assign_ref(&mut p) })
-            } else {
-                None
-            },
-            add: if add {
-                Some(unsafe { util::assign_ref(&mut p) })
-            } else {
-                None
-            },
-            biomes: unsafe { util::assign_ref(&mut p) },
-        })
+        // Safety: This is safe because `p` is allocated and initialised correctly.
+        self.sections[section] = unsafe { Some(ChunkSection0::new(&mut p, self.skylight, add)) };
     }
 
     pub fn insert_add(&mut self, section: usize) {
@@ -292,13 +299,17 @@ impl ChunkColumn0<'_> {
         unsafe { p.write_bytes(0, 2048) };
         if let Some(section) = &mut self.sections[section] {
             assert!(section.add.is_none());
+            // Safety: This is safe because p is allocated and zero-initialised for 2048 bytes.
             section.add = unsafe { Some((&mut *(p.cast() as *mut [u8; 2048])).into()) }
         } else {
             panic!("chunk section does not exist")
         }
     }
 
-    util::reallocate_fn!(ChunkSection0, |self, p, section| unsafe { ChunkSection0::new(&mut p, self.skylight, section.add.is_some()) });
+    util::reallocate_fn!(ChunkSection0, |self, p, section| {
+        // Safety: This is safe because `p` is properly initialised and allocated inside of the macro.
+        unsafe { ChunkSection0::new(&mut p, self.skylight, section.add.is_some()) }
+    });
 
     /// Returns a bool indicating if this column stores sky light data.
     pub fn skylight(&self) -> bool {
@@ -379,19 +390,15 @@ impl ChunkSection0<'_> {
     unsafe fn new(p: &mut *mut u8, skylight: bool, add: bool) -> Self {
         Self {
             blocks: util::assign_ref(p),
-            metadata: util::assign_ref(p) ,
-            light: util::assign_ref(p) ,
+            metadata: util::assign_ref(p),
+            light: util::assign_ref(p),
             skylight: if skylight {
                 Some(util::assign_ref(p))
             } else {
                 None
             },
-            add: if add {
-                Some(util::assign_ref(p))
-            } else {
-                None
-            },
-            biomes: util::assign_ref(p) ,
+            add: if add { Some(util::assign_ref(p)) } else { None },
+            biomes: util::assign_ref(p),
         }
     }
 }
