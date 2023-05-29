@@ -2,7 +2,7 @@ use std::{mem::MaybeUninit, ptr::NonNull};
 
 use miners::{
     encoding::{Decode, Encode},
-    nbt::{Compound, List, Value},
+    nbt::List,
 };
 
 use crate::containers::{BlockArray49, ByteArray, HalfByteArray, Block49, ReadContainer};
@@ -625,7 +625,7 @@ mod tests {
     }
 
     mod pv49 {
-        use std::{io::{Cursor, Write}, path::PathBuf, borrow::Cow};
+        use std::{path::PathBuf, borrow::Cow};
 
         use miners::{nbt, encoding::Decode};
 
@@ -648,7 +648,7 @@ mod tests {
             let mut region = region::RegionFile49::open(PathBuf::from("./test_data/r.0.0.mca")).unwrap();
             let buf = &region.chunk(0, 0).unwrap()[..];
             let (_, nbt) = decode_nbt(buf).unwrap();
-            let chunk = ChunkColumn49::from_nbt(nbt, true).unwrap();
+            let _chunk = ChunkColumn49::from_nbt(nbt, true).unwrap();
         }
     }
 }

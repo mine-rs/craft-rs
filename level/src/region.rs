@@ -43,7 +43,7 @@ impl RegionFile49 {
                     }
                     let len = todo!();
                     self.file.seek(SeekFrom::Start((location.offset() * 8192) as u64))?;
-                    self.file.read_exact(&mut buf[pos..pos+size])?;
+                    self.file.read_exact(&mut buf[pos..pos+len])?;
                     len
                 },
             };
@@ -183,7 +183,7 @@ impl Location49 {
     }
 
     /// Returns the section count.
-    pub fn count(self) -> u8 {
+    pub fn _count(self) -> u8 {
         self.0.to_ne_bytes()[3]
     }
 }
