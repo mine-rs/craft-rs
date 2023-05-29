@@ -2,3 +2,4 @@
 
 pub mod chunk;
 pub mod containers;
+pub mod region;

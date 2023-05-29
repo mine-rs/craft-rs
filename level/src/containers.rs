@@ -9,6 +9,12 @@ pub mod palette;
 pub struct Block49(u16);
 
 impl Block49 {
+    pub fn new(id: u16, metadata: u8) -> Self {
+        Self(
+            (id << 4) & metadata as u16
+        )
+    }
+
     pub fn id(self) -> u16 {
         self.0 >> 4
     }
@@ -35,25 +41,17 @@ impl<const N: usize> AsRef<[u8]> for BlockArray49<N> {
     }
 }
 
-impl<'a, const N: usize> From<&'a [u8; N]> for &'a BlockArray49<N> {
-    fn from(value: &'a [u8; N]) -> Self {
-        // SAFETY: This is fine because ByteArray is repr(transparent)
-        unsafe { transmute(value) }
-    }
-}
+impl<'a, const N: usize> TryFrom<&'a [u8]> for &'a BlockArray49<N> {
+    type Error = std::io::Error;
 
-impl<'a, const N: usize> From<&'a BlockArray49<N>> for &'a [u8; N] {
-    fn from(value: &'a BlockArray49<N>) -> Self {
-        // SAFETY: This is fine because ByteArray is repr(transparent)
-        unsafe { transmute(value) }
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        if value.len() == N * 2 {
+            Ok(unsafe { std::mem::transmute(value.as_ptr()) })
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid len"))
+        }
     }
-}
-
-impl<'a, const N: usize> From<&'a mut [u8; N]> for &'a mut BlockArray49<N> {
-    fn from(value: &'a mut [u8; N]) -> Self {
-        // SAFETY: This is fine because ByteArray is repr(transparent)
-        unsafe { transmute(value) }
-    }
+    
 }
 
 impl<'a, const N: usize> From<&'a mut BlockArray49<N>> for &'a mut [u8; N] {
@@ -75,7 +73,7 @@ impl<'dec, const N: usize> Decode<'dec> for &BlockArray49<N> {
         // SAFETY: This is safe because we created the ptr from a slice that we know has a len of RLEN
         let data: &[u8; N] = unsafe { &*(slice.as_ptr().cast() as *const [u8; N]) };
         //let this = unsafe { Box::new(data) };
-        Ok(Self::from(data))
+        Ok(Self::try_from(data as &[u8])?)
     }
 }
 
