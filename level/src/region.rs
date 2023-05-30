@@ -1,5 +1,8 @@
-use std::{io::{Read, Seek, SeekFrom, Cursor}, path};
 use std::fs;
+use std::{
+    io::{Cursor, Read, Seek, SeekFrom},
+    path,
+};
 
 /// A struct for handling region files.
 pub struct RegionFile49 {
@@ -52,14 +55,14 @@ impl RegionFile49 {
         }
         self.file = fs::File::create(&self.path)?;
         self.file.write_all(&buf)?;
-        
+
         Ok(())
         */
     }
 
     pub fn open(path: path::PathBuf) -> std::io::Result<Self> {
         let mut file = fs::File::open(&path)?;
-        let mut buf = Box::new([0;8192]);
+        let mut buf = Box::new([0; 8192]);
         file.read_exact(buf.as_mut_slice())?;
         debug_assert_eq!(std::mem::size_of::<RegionHeader49>(), 8192);
         // Safety: This is safe because `RegionHeader49` has the same size as `[u8; 8192]`
@@ -71,22 +74,26 @@ impl RegionFile49 {
         let location = if let Some(v) = self.header.location(x, z) {
             v
         } else {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, "chunk was not found"))
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "chunk was not found",
+            ));
         };
-        
-        self.file.seek(SeekFrom::Start((location.offset() * 8192) as u64))?;
-        
+
+        self.file
+            .seek(SeekFrom::Start((location.offset() * 8192) as u64))?;
+
         let len = {
             let mut bytes = [0; 4];
             self.file.read_exact(&mut bytes)?;
-            u32::from_be_bytes(bytes) as usize -1
+            u32::from_be_bytes(bytes) as usize - 1
         };
         let compression_type = {
             let mut bytes = [0; 1];
             self.file.read_exact(&mut bytes)?;
             bytes[0]
         };
-        
+
         let mut compressed = vec![0; len];
         self.file.read_exact(&mut compressed)?;
 
@@ -104,11 +111,11 @@ impl RegionFile49 {
                 decoder.read_to_end(&mut buf)?;
                 Ok(buf)
             }
-            _ => {
-                Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("invalid compression type ({compression_type}), must be either 1 or 2")))
-            }
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("invalid compression type ({compression_type}), must be either 1 or 2"),
+            )),
         }
-
     }
 
     pub fn timestamp(&self, x: i32, z: i32) -> Option<i32> {
@@ -121,7 +128,7 @@ struct RegionFile(Vec<u8>);
 
 impl RegionFile {
     pub fn from_reader<T: Read + Seek>(rdr: &mut T) -> std::io::Result<Self>{
-        let mut buf = 
+        let mut buf =
         {
             const CHUNK_DATA_LEN_POS: usize = 8192;
             let start = rdr.stream_position()?;

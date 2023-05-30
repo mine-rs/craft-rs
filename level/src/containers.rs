@@ -11,9 +11,7 @@ pub struct Block49(u16);
 
 impl Block49 {
     pub fn new(id: u16, metadata: u8) -> Self {
-        Self(
-            (id << 4) & metadata as u16
-        )
+        Self((id << 4) & metadata as u16)
     }
 
     pub fn id(self) -> u16 {
@@ -54,10 +52,12 @@ impl<'a, const N: usize> TryFrom<&'a [u8]> for &'a BlockArray49<N> {
         if value.len() == N * 2 {
             Ok(unsafe { std::mem::transmute(value.as_ptr()) })
         } else {
-            Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid len"))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid len",
+            ))
         }
     }
-    
 }
 
 impl<'a, const N: usize> From<&'a mut BlockArray49<N>> for &'a mut [u8; N] {
@@ -98,7 +98,7 @@ unsafe impl<const N: usize> WriteContainer<Block49> for BlockArray49<N> {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[repr(transparent)]
 pub struct ByteArray<const N: usize>([u8; N]);
 

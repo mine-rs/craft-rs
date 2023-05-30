@@ -5,7 +5,7 @@ use miners::{
     nbt::List,
 };
 
-use crate::containers::{BlockArray49, ByteArray, HalfByteArray, Block49, ReadContainer};
+use crate::containers::{Block49, BlockArray49, ByteArray, HalfByteArray, ReadContainer};
 
 mod util {
     #[inline]
@@ -210,6 +210,7 @@ impl ChunkColumn49 {
     /// Parses 1.8 anvil chunk nbt data into a `ChunkColumn49`. This function does not take an entire region file as input, but one of the chunks contained within.
     pub fn from_nbt(nbt: &miners::nbt::Compound, skylight: bool) -> Option<Self> {
         //TODO: Fix pointer nonsense
+        //TODO: Return Result and not Option.
         let nbt = nbt.get("Level")?.as_compound()?;
 
         let sections_data = {
@@ -224,45 +225,40 @@ impl ChunkColumn49 {
             None, None,
         ];
         let size: usize = Self::section_size(skylight) * sections_data.len();
-
         let mut buf = Vec::with_capacity(size);
 
         let mut p = buf.as_mut_ptr();
         for section in sections_data.iter() {
-            //let mut p_offset: usize = 0;
-            unsafe {
-                let light = section.get("BlockLight")?.as_byte_array()?;
-                if light.len() != 2048 {
-                    return None;
-                }
-                buf.extend_from_slice(light);
-                //p_offset += 2048;
-                let blocks = section.get("Blocks")?.as_byte_array()?;
-                if blocks.len() != 4096 {
-                    return None;
-                }
-                let metadata = section.get("Data")?.as_byte_array()?;
-                if metadata.len() != 2048 {
-                    return None;
-                }
-                let metadata = <&HalfByteArray<2048>>::from(std::mem::transmute::<*const u8, &[u8; 2048]>(metadata.as_ptr()));
-                for i in 0..4096 {
-                    let block = Block49::new(blocks[i] as u16, metadata.get(i));
-                    buf.extend_from_slice(block.as_slice());
-                    //p_offset += 2;
-                }
-                if skylight {
-                    let skylight = section.get("SkyLight")?.as_byte_array()?;
-                    if skylight.len() != 2048 {
-                        return None;
-                    }
-                    buf.extend_from_slice(&skylight);
-                    //p_offset += 2048
-                    
-                }
+            let light = section.get("BlockLight")?.as_byte_array()?;
+            if light.len() != 2048 {
+                return None;
             }
-            sections[section.get("Y")?.as_byte()? as usize] = Some(unsafe { ChunkSection49::new(&mut p, skylight) });
-            //p = unsafe { p.add(p_offset) }
+            buf.extend_from_slice(light);
+            let blocks = section.get("Blocks")?.as_byte_array()?;
+            if blocks.len() != 4096 {
+                return None;
+            }
+            let metadata = section.get("Data")?.as_byte_array()?;
+            if metadata.len() != 2048 {
+                return None;
+            }
+            //let metadata = <&HalfByteArray<2048>>::from(std::mem::transmute::<*const u8, &[u8; 2048]>(metadata.as_ptr()));
+            let metadata: &[u8; 2048] = metadata[..2048].try_into().unwrap();
+            let metadata = <&HalfByteArray<2048>>::from(metadata);
+
+            for i in 0..4096 {
+                let block = Block49::new(blocks[i] as u16, metadata.get(i));
+                buf.extend_from_slice(block.as_slice());
+            }
+            if skylight {
+                let skylight = section.get("SkyLight")?.as_byte_array()?;
+                if skylight.len() != 2048 {
+                    return None;
+                }
+                buf.extend_from_slice(&skylight);
+            }
+            *sections.get_mut(section.get("Y")?.as_byte()? as usize)? =
+                Some(unsafe { ChunkSection49::new(&mut p, skylight) });
         }
         Some(Self {
             size,
@@ -274,7 +270,16 @@ impl ChunkColumn49 {
     }
 
     pub(crate) const fn section_size(skylight: bool) -> usize {
-        4096 + 1024 + if skylight { 1024 } else { 0 } + 256
+        use std::mem::size_of;
+        size_of::<BlockArray49<4096>>()
+            + size_of::<HalfByteArray<2048>>()
+            + if skylight {
+                size_of::<HalfByteArray<2048>>()
+            } else {
+                0
+            }
+            + size_of::<ByteArray<256>>()
+        //8196 + 2048 + if skylight { 2048 } else { 0 } + 256
     }
 
     pub fn insert_section(&mut self, i: usize, skylight: bool) {
@@ -444,7 +449,23 @@ impl ChunkColumn0 {
     }
 
     const fn section_size(skylight: bool, add: bool) -> usize {
-        4096 + (2 * 2048) + 256 + if skylight { 2048 } else { 0 } + if add { 2048 } else { 0 }
+        use std::mem::size_of;
+        size_of::<ByteArray<4096>>()
+            + size_of::<HalfByteArray<2048>>()
+            + size_of::<HalfByteArray<2048>>()
+            + size_of::<HalfByteArray<2048>>()
+            + if skylight {
+                size_of::<HalfByteArray<2048>>()
+            } else {
+                0
+            }
+            + if add {
+                size_of::<HalfByteArray<2048>>()
+            } else {
+                0
+            }
+            + size_of::<ByteArray<256>>()
+        //4096 + (2 * 2048) + 256 + if skylight { 2048 } else { 0 } + if add { 2048 } else { 0 }
     }
 }
 
@@ -581,7 +602,7 @@ mod tests {
     }
 
     mod pv0 {
-    use super::super::{ChunkColumn0, util::bit_at};
+        use super::super::{util::bit_at, ChunkColumn0};
         #[test]
         fn _from_reader() {
             // first we generate the data
@@ -589,9 +610,9 @@ mod tests {
             let bitmask = 0b1011001110110011u16;
             let add = 0b1001001010010010u16;
             let skylight = true;
-    
+
             let mut data = Vec::<u8>::new();
-    
+
             for i in 0u8..16 {
                 let exists = bit_at(bitmask, i);
                 let add = bit_at(add, i);
@@ -627,7 +648,7 @@ mod tests {
     mod pv49 {
         use std::io::Cursor;
 
-        use miners::{nbt, encoding::Decode};
+        use miners::{encoding::Decode, nbt};
 
         use crate::chunk::ChunkColumn49;
 
