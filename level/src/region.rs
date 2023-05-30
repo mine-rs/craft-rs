@@ -1,16 +1,18 @@
-use std::{io::{Read, Seek, SeekFrom, Cursor, Write}, path};
+use std::{io::{Read, Seek, SeekFrom, Cursor}, path};
 use std::fs;
 
 /// A struct for handling region files.
 pub struct RegionFile49 {
     header: Box<RegionHeader49>,
     file: fs::File,
+    #[allow(dead_code)]
     path: path::PathBuf,
 }
 
 impl RegionFile49 {
-    pub fn save(&mut self, region: [Option<&[u8]>; 1024]) -> std::io::Result<()> {
-        // TODO: Deal with compression
+    pub fn save(&mut self, _region: [Option<&[u8]>; 1024]) -> std::io::Result<()> {
+        todo!()
+        /*
         let mut size: usize = 0;
         for (i, chunk) in region.iter().enumerate() {
             let location = self.header.locations[i];
@@ -52,6 +54,7 @@ impl RegionFile49 {
         self.file.write_all(&buf)?;
         
         Ok(())
+        */
     }
 
     pub fn open(path: path::PathBuf) -> std::io::Result<Self> {
@@ -78,19 +81,14 @@ impl RegionFile49 {
             self.file.read_exact(&mut bytes)?;
             u32::from_be_bytes(bytes) as usize -1
         };
-        dbg!(len);
         let compression_type = {
             let mut bytes = [0; 1];
             self.file.read_exact(&mut bytes)?;
             bytes[0]
         };
-        dbg!(compression_type);
         
         let mut compressed = vec![0; len];
         self.file.read_exact(&mut compressed)?;
-
-        let mut f = std::fs::File::create("testnbt.nbt").unwrap();
-        f.write_all(&compressed).unwrap();
 
         let mut cursor = Cursor::new(compressed);
         let mut buf = Vec::new();

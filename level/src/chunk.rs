@@ -225,18 +225,18 @@ impl ChunkColumn49 {
         ];
         let size: usize = Self::section_size(skylight) * sections_data.len();
 
-        let buf = util::create_buffer(size);
+        let mut buf = Vec::with_capacity(size);
 
-        let mut p = buf;
+        let mut p = buf.as_mut_ptr();
         for section in sections_data.iter() {
-            let mut p_offset: usize = 0;
+            //let mut p_offset: usize = 0;
             unsafe {
                 let light = section.get("BlockLight")?.as_byte_array()?;
                 if light.len() != 2048 {
                     return None;
                 }
-                std::ptr::copy_nonoverlapping(light.as_ptr(), p, 2048);
-                p_offset += 2048;
+                buf.extend_from_slice(light);
+                //p_offset += 2048;
                 let blocks = section.get("Blocks")?.as_byte_array()?;
                 if blocks.len() != 4096 {
                     return None;
@@ -248,27 +248,27 @@ impl ChunkColumn49 {
                 let metadata = <&HalfByteArray<2048>>::from(std::mem::transmute::<*const u8, &[u8; 2048]>(metadata.as_ptr()));
                 for i in 0..4096 {
                     let block = Block49::new(blocks[i] as u16, metadata.get(i));
-                    std::ptr::copy(&block as *const Block49, p.cast(), 1);
-                    p_offset += 2;
+                    buf.extend_from_slice(block.as_slice());
+                    //p_offset += 2;
                 }
                 if skylight {
                     let skylight = section.get("SkyLight")?.as_byte_array()?;
                     if skylight.len() != 2048 {
                         return None;
                     }
-                    std::ptr::copy_nonoverlapping(skylight.as_ptr(), p, 2048);
-                    p_offset += 2048
+                    buf.extend_from_slice(&skylight);
+                    //p_offset += 2048
                     
                 }
             }
             sections[section.get("Y")?.as_byte()? as usize] = Some(unsafe { ChunkSection49::new(&mut p, skylight) });
-            p = unsafe { p.add(p_offset) }
+            //p = unsafe { p.add(p_offset) }
         }
         Some(Self {
             size,
             sections,
             // Safety: This is safe because buf isn't a null pointer.
-            buf: Some(unsafe { NonNull::new_unchecked(buf) }),
+            buf: Some(unsafe { NonNull::new_unchecked(buf.as_mut_ptr()) }),
             skylight,
         })
     }
@@ -645,9 +645,8 @@ mod tests {
 
         #[test]
         fn _from_nbt() {
-            let mut region = region::RegionFile49::open(PathBuf::from("./test_data/r.0.0.mca")).unwrap();
-            let buf = &region.chunk(0, 0).unwrap()[..];
-            let (_, nbt) = decode_nbt(buf).unwrap();
+            let data = include_bytes!("../test_data/testchunk.nbt");
+            let (_, nbt) = decode_nbt(data).unwrap();
             let _chunk = ChunkColumn49::from_nbt(nbt, true).unwrap();
         }
     }
