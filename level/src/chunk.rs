@@ -208,7 +208,7 @@ impl ChunkColumn49 {
 
 impl ChunkColumn49 {
     /// Parses 1.8 anvil chunk nbt data into a `ChunkColumn49`. This function does not take an entire region file as input, but one of the chunks contained within.
-    pub fn from_nbt(nbt: miners::nbt::Compound, skylight: bool) -> Option<Self> {
+    pub fn from_nbt(nbt: &miners::nbt::Compound, skylight: bool) -> Option<Self> {
         //TODO: Fix pointer nonsense
         let nbt = nbt.get("Level")?.as_compound()?;
 
@@ -625,29 +625,17 @@ mod tests {
     }
 
     mod pv49 {
-        use std::borrow::Cow;
+        use std::io::Cursor;
 
         use miners::{nbt, encoding::Decode};
 
         use crate::chunk::ChunkColumn49;
 
-        // Temporary nbt decoding method while the main decode implementation is broken.
-        fn decode_nbt(buf: &[u8]) -> miners::encoding::decode::Result<(Cow<str>, nbt::Compound)> {
-            let mut c = std::io::Cursor::new(buf);
-            let tag = nbt::NbtTag::decode(&mut c)?;
-            if !matches!(tag, nbt::NbtTag::Compound) {
-                return Err(miners::encoding::decode::Error::InvalidId);
-            }
-            let name = miners::encoding::attrs::Mutf8::decode(&mut c)?.into_inner();
-            let compound = nbt::Compound::decode(&mut c)?;
-            Ok((name, compound))
-        }
-
         #[test]
         fn _from_nbt() {
             let data = include_bytes!("../test_data/testchunk.nbt");
-            let (_, nbt) = decode_nbt(data).unwrap();
-            let _chunk = ChunkColumn49::from_nbt(nbt, true).unwrap();
+            let nbt = nbt::Nbt::decode(&mut Cursor::new(data)).unwrap();
+            let _chunk = ChunkColumn49::from_nbt(&nbt, true).unwrap();
         }
     }
 }
