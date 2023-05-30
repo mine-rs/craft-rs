@@ -625,11 +625,11 @@ mod tests {
     }
 
     mod pv49 {
-        use std::{path::PathBuf, borrow::Cow};
+        use std::borrow::Cow;
 
         use miners::{nbt, encoding::Decode};
 
-        use crate::{region, chunk::ChunkColumn49};
+        use crate::chunk::ChunkColumn49;
 
         // Temporary nbt decoding method while the main decode implementation is broken.
         fn decode_nbt(buf: &[u8]) -> miners::encoding::decode::Result<(Cow<str>, nbt::Compound)> {
