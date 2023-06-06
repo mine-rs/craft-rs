@@ -24,7 +24,8 @@ use miners::protocol::netty::login::SbLogin;
 use miners::protocol::netty::play::clientbound::{
     Dimension0, GameMode0, JoinGame29, KeepAlive32, PlayerAbilities0, SpawnPosition6, MapChunkBulk27, ChunkData27,
 };
-use miners::protocol::netty::play::serverbound::{KeepAlive7, PlayerPositionAndLook10};
+use miners::protocol::netty::play::clientbound::PositionAndLook6;
+use miners::protocol::netty::play::serverbound::KeepAlive7;
 use miners::protocol::netty::play::SbPlay;
 use miners::{
     net::encoding::Encoder, protocol::netty::handshaking::serverbound::Handshake0,
@@ -225,8 +226,9 @@ async fn login(
     conn.enable_encryption(secret.as_ref())?;
 
     conn.write_half
-        .write_packet(version, SetCompression27 { threshold: -1 }, encoder)
+        .write_packet(version, SetCompression27 { threshold: 512 }, encoder)
         .await?;
+    conn.enable_compression(512);
     dbg!(uuid);
     conn.write_half
         .write_packet(
@@ -288,13 +290,13 @@ async fn login(
     write
         .write_packet(
             version,
-            PlayerPositionAndLook10 {
+            PositionAndLook6 {
                 x: 0.0,
                 y: 60.0,
                 z: 0.0,
                 yaw: 0.0,
                 pitch: 0.0,
-                on_ground: false,
+                relativity: miners::protocol::netty::play::clientbound::PositionAndLookBitfield6 { x: false, y: false, z: false, pitch: false, yaw: false },
             },
             encoder,
         )
