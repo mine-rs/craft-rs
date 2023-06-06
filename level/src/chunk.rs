@@ -111,6 +111,44 @@ mod util {
         };
     }
 
+    /// Used to implement clone for the 0 and 49 protocol versions
+    //TODO: Less code duplication with reallocate_fn (so probably add an underlying method that basically clones but also can extend the buffer which is then called by the clone and reallocate implementation)
+    macro_rules! impl_clone {
+        ($column_t:ty, $section_t:ty, | $self:ident, $p:ident, $section:ident | $e:expr) => {
+            impl Clone for $column_t {
+                fn clone(&$self) -> Self {
+                    let new = $crate::chunk::util::create_buffer($self.size);
+
+                    let mut sections: [Option<$section_t>; 16] = [
+                        None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+                        None, None,
+                    ];
+    
+                    if let Some(buf) = $self.buf {
+                        // SAFETY: This is fine because we know self.buf is initialised and new and self.buf don't overlap.
+                        unsafe { std::ptr::copy_nonoverlapping(buf.as_ptr(), new, $self.size) };
+                        let mut $p = new;
+    
+                        for (i, section) in $self.sections.iter().enumerate() {
+                            if let Some($section) = section {
+                                let section = $e;
+                                sections[i] = Some(section)
+                            }
+                        }
+                    }
+    
+                    Self {
+                        // SAFETY: This is safe because we know new isn't a null pointer.
+                        buf: unsafe { Some(NonNull::new_unchecked(new)) },
+                        size: $self.size,
+                        skylight: $self.skylight,
+                        sections,
+                    }
+                }
+            }
+        };
+    }
+
     macro_rules! from_reader_fn {
         ($section:ty, | $p:ident, $skylight:ident | $e:expr $(, $add:ident, $t:ty)?) => {
             pub fn from_reader(
@@ -177,18 +215,39 @@ mod util {
     pub(super) use getter;
     pub(super) use opt_getter;
     pub(super) use reallocate_fn;
+    pub(super) use impl_clone;
 }
 
-pub struct ChunkColumn49 {
+pub struct ChunkColumn47 {
     buf: Option<NonNull<u8>>,
     size: usize,
     skylight: bool,
-    sections: [Option<ChunkSection49>; 16],
+    sections: [Option<ChunkSection47>; 16],
 }
 
-impl ChunkColumn49 {
+// Safety: This is safe because no data races can occur since the mutable pointers are only written to when &mut self is passed.
+unsafe impl Sync for ChunkColumn47 {}
+// Safety: ^
+unsafe impl Send for ChunkColumn47 {}
+
+util::impl_clone!(ChunkColumn47, ChunkSection47, |self, p, _section| {
+    // Safety: This is safe because `p` is properly initialised and allocated inside of the macro.
+    unsafe { ChunkSection47::new(&mut p, self.skylight) }
+});
+
+impl Encode for ChunkColumn47 {
+    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
+        for section in self.sections.iter().flatten() {
+            section.encode(writer)?
+        }
+        Ok(())
+    }
+}
+
+
+impl ChunkColumn47 {
     /// Gets a reference to the section if it exists.
-    pub fn section(&self, section: usize) -> Option<&ChunkSection49> {
+    pub fn section(&self, section: usize) -> Option<&ChunkSection47> {
         if let Some(ref section) = self.sections[section] {
             Some(section)
         } else {
@@ -197,16 +256,24 @@ impl ChunkColumn49 {
     }
 
     /// Gets a mutable reference to the section if it exists.
-    pub fn section_mut(&mut self, section: usize) -> Option<&mut ChunkSection49> {
+    pub fn section_mut(&mut self, section: usize) -> Option<&mut ChunkSection47> {
         if let Some(ref mut section) = self.sections[section] {
             Some(section)
         } else {
             None
         }
     }
+
+    pub fn primary_bitmap(&self) -> u16 {
+        let mut bitmap = 0u16;
+        for (i, _) in self.sections.iter().enumerate().flat_map(|(i, section)| section.into_iter().map(move |x| (i, x))) {
+            bitmap |= 1 << i
+        }
+        bitmap
+    }
 }
 
-impl ChunkColumn49 {
+impl ChunkColumn47 {
     /// Parses 1.8 anvil chunk nbt data into a `ChunkColumn49`. This function does not take an entire region file as input, but one of the chunks contained within.
     pub fn from_nbt(nbt: &miners::nbt::Compound, skylight: bool) -> Option<Self> {
         //TODO: Fix pointer nonsense
@@ -220,7 +287,7 @@ impl ChunkColumn49 {
             sections
         };
 
-        let mut sections: [Option<ChunkSection49>; 16] = [
+        let mut sections: [Option<ChunkSection47>; 16] = [
             None, None, None, None, None, None, None, None, None, None, None, None, None, None,
             None, None,
         ];
@@ -258,13 +325,19 @@ impl ChunkColumn49 {
                 buf.extend_from_slice(&skylight);
             }
             *sections.get_mut(section.get("Y")?.as_byte()? as usize)? =
-                Some(unsafe { ChunkSection49::new(&mut p, skylight) });
+                Some(unsafe { ChunkSection47::new(&mut p, skylight) });
         }
+
+        let buf_ptr = buf.as_mut_ptr();
+
+        // std::mem::forget the vec to prevent the buffer from being deallocated.
+        std::mem::forget(buf);
+
         Some(Self {
             size,
             sections,
             // Safety: This is safe because buf isn't a null pointer.
-            buf: Some(unsafe { NonNull::new_unchecked(buf.as_mut_ptr()) }),
+            buf: Some(unsafe { NonNull::new_unchecked(buf_ptr) }),
             skylight,
         })
     }
@@ -289,30 +362,44 @@ impl ChunkColumn49 {
         // Safety: This is safe because we know p was allocated for size.
         unsafe { p.write_bytes(0, size) }
         // Safety: This is safe because p was allocated and initialised correctly.
-        self.sections[i] = unsafe { Some(ChunkSection49::new(&mut p, skylight)) };
+        self.sections[i] = unsafe { Some(ChunkSection47::new(&mut p, skylight)) };
     }
 
-    util::reallocate_fn!(ChunkSection49, |self, p, _section| {
+    util::reallocate_fn!(ChunkSection47, |self, p, _section| {
         // Safety: This is safe because `p` is properly initialised and allocated inside of the macro.
-        unsafe { ChunkSection49::new(&mut p, self.skylight) }
+        unsafe { ChunkSection47::new(&mut p, self.skylight) }
     });
 
-    util::from_reader_fn!(ChunkSection49, |p, skylight| {
+    util::from_reader_fn!(ChunkSection47, |p, skylight| {
         // Safety: This is safe because `p` is properly initialised and allocated inside of the macro.
-        unsafe { ChunkSection49::new(&mut p, skylight) }
+        unsafe { ChunkSection47::new(&mut p, skylight) }
     });
 }
 
-pub struct ChunkSection49 {
+pub struct ChunkSection47 {
     blocks: NonNull<BlockArray49<4096>>,
     light: NonNull<HalfByteArray<2048>>,
     skylight: Option<NonNull<HalfByteArray<2048>>>,
     biomes: NonNull<ByteArray<256>>,
 }
 
-impl ChunkSection49 {
+impl Encode for ChunkSection47 {
+    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
+        unsafe {
+            writer.write_all(self.blocks.as_ref().as_ref())?;
+            writer.write_all(self.light.as_ref().as_ref())?;
+            if let Some(skylight) = &self.skylight {
+                writer.write_all(skylight.as_ref().as_ref())?;
+            }
+            writer.write_all(self.biomes.as_ref().as_ref())?;
+            Ok(())
+        }
+    }
+}
+
+impl ChunkSection47 {
     pub(self) unsafe fn new(p: &mut *mut u8, skylight: bool) -> Self {
-        ChunkSection49 {
+        ChunkSection47 {
             blocks: util::assign_ref::<4096, BlockArray49<4096>>(p),
             light: util::assign_ref::<2048, HalfByteArray<2048>>(p),
             skylight: if skylight {
@@ -325,7 +412,7 @@ impl ChunkSection49 {
     }
 }
 
-impl ChunkSection49 {
+impl ChunkSection47 {
     util::getter!(blocks, blocks_mut, BlockArray49<4096>);
     util::getter!(light, light_mut, HalfByteArray<2048>);
     util::opt_getter!(skylight, skylight_mut, HalfByteArray<2048>);
@@ -343,6 +430,16 @@ pub struct ChunkColumn0 {
     skylight: bool,
     sections: [Option<ChunkSection0>; 16],
 }
+
+// Safety: This is safe because no data races can occur since the mutable pointers are only written to when &mut self is passed.
+unsafe impl Sync for ChunkColumn0 {}
+// Safety: ^
+unsafe impl Send for ChunkColumn0 {}
+
+util::impl_clone!(ChunkColumn0, ChunkSection0, |self, p, section| {
+    // Safety: This is safe because `p` is properly initialised and allocated inside of the macro.
+    unsafe { ChunkSection0::new(&mut p, self.skylight, section.add.is_some()) }
+});
 
 impl Encode for ChunkColumn0 {
     // This implementation only writes the chunk data, not the metadata.
@@ -650,13 +747,14 @@ mod tests {
 
         use miners::{encoding::Decode, nbt};
 
-        use crate::chunk::ChunkColumn49;
+        use crate::chunk::ChunkColumn47;
 
         #[test]
         fn _from_nbt() {
             let data = include_bytes!("../test_data/testchunk.nbt");
             let nbt = nbt::Nbt::decode(&mut Cursor::new(data)).unwrap();
-            let _chunk = ChunkColumn49::from_nbt(&nbt, true).unwrap();
+            let chunk = ChunkColumn47::from_nbt(&nbt, true).unwrap();
+            let _ = chunk.clone();
         }
     }
 }
