@@ -11,7 +11,7 @@ pub struct Block49(u16);
 
 impl Block49 {
     pub fn new(id: u16, metadata: u8) -> Self {
-        Self((id << 4) & metadata as u16)
+        Self((id << 4) | metadata as u16)
     }
 
     pub fn id(self) -> u16 {
