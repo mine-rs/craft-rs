@@ -21,7 +21,6 @@ use miners::protocol::netty::login::clientbound::{
 };
 use miners::protocol::netty::login::serverbound::{EncryptionResponse19, LoginStart0};
 use miners::protocol::netty::login::SbLogin;
-use miners::protocol::netty::play::clientbound::PositionAndLook6;
 use miners::protocol::netty::play::clientbound::{
     ChunkData27, Dimension0, GameMode0, JoinGame29, KeepAlive32, MapChunkBulk27, PlayerAbilities0,
     PositionAndLook6, SpawnPosition6,
@@ -258,8 +257,6 @@ async fn login(
     conn.write_half.flush().await?;
     println!("{username} logged in!");
     println!("success0");
-
-    std::thread::sleep(core::time::Duration::from_secs(2));
 
     let (mut read, mut write) = conn.split();
 
