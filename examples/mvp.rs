@@ -21,6 +21,7 @@ use miners::protocol::netty::login::clientbound::{
 };
 use miners::protocol::netty::login::serverbound::{EncryptionResponse19, LoginStart0};
 use miners::protocol::netty::login::SbLogin;
+use miners::protocol::netty::play::clientbound::PositionAndLook6;
 use miners::protocol::netty::play::clientbound::{
     ChunkData27, Dimension0, GameMode0, JoinGame29, KeepAlive32, MapChunkBulk27, PlayerAbilities0,
     PositionAndLook6, SpawnPosition6,
@@ -238,6 +239,7 @@ async fn login(
     //     .await?;
     // conn.write_half.enable_compression(1);
     // dbg!(uuid);
+
     conn.write_half
         .write_packet(
             version,
