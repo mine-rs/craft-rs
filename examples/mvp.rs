@@ -17,14 +17,15 @@ use miners::nbt;
 use miners::protocol::netty::handshaking::serverbound::NextState0;
 use miners::protocol::netty::handshaking::SbHandshaking;
 use miners::protocol::netty::login::clientbound::{
-    EncryptionRequest19, SetCompression27, Success5, Success0,
+    EncryptionRequest19, SetCompression27, Success0, Success5,
 };
 use miners::protocol::netty::login::serverbound::{EncryptionResponse19, LoginStart0};
 use miners::protocol::netty::login::SbLogin;
 use miners::protocol::netty::play::clientbound::{
-    Dimension0, GameMode0, JoinGame29, KeepAlive32, PlayerAbilities0, SpawnPosition6, MapChunkBulk27, ChunkData27,
+    ChunkData27, Dimension0, GameMode0, JoinGame29, KeepAlive32, MapChunkBulk27, PlayerAbilities0,
+    PositionAndLook6, SpawnPosition6,
 };
-use miners::protocol::netty::play::serverbound::{KeepAlive7, PlayerPositionAndLook10};
+use miners::protocol::netty::play::serverbound::KeepAlive7;
 use miners::protocol::netty::play::SbPlay;
 use miners::{
     net::encoding::Encoder, protocol::netty::handshaking::serverbound::Handshake0,
@@ -49,14 +50,16 @@ async fn main() {
 
     let version = ProtocolVersion::new(VERSION).unwrap();
 
-    let chunk = Arc::new(ChunkColumn47::from_nbt(
-        &nbt::Nbt::decode(&mut Cursor::new(include_bytes!(
-            "../level/test_data/testchunk.nbt"
-        )))
+    let chunk = Arc::new(
+        ChunkColumn47::from_nbt(
+            &nbt::Nbt::decode(&mut Cursor::new(include_bytes!(
+                "../level/test_data/testchunk.nbt"
+            )))
+            .unwrap(),
+            true,
+        )
         .unwrap(),
-        true,
-    )
-    .unwrap());
+    );
 
     let listener = async_std::net::TcpListener::bind("127.0.0.1:25565")
         .await
@@ -66,7 +69,13 @@ async fn main() {
     loop {
         let (stream, _addr) = listener.accept().await.unwrap();
         let conn = miners::net::conn::Connection::new(stream.clone(), stream);
-        spawn(accept(conn, version, priv_key.clone(), pub_key.clone(), chunk.clone()));
+        spawn(accept(
+            conn,
+            version,
+            priv_key.clone(),
+            pub_key.clone(),
+            chunk.clone(),
+        ));
     }
 }
 
@@ -161,79 +170,83 @@ async fn login(
         bail!("incorrect packet order")
     };
 
-    let verify_token: [u8; 32] = rand::random();
+    // let verify_token: [u8; 32] = rand::random();
 
-    conn.write_half
-        .write_packet(
-            version,
-            EncryptionRequest19 {
-                server_id: "".into(),
-                public_key: pub_key.as_bytes().into(),
-                verify_token: (&verify_token[..]).into(),
-            },
-            encoder,
-        )
-        .await?;
+    // conn.write_half
+    //     .write_packet(
+    //         version,
+    //         EncryptionRequest19 {
+    //             server_id: "".into(),
+    //             public_key: pub_key.as_bytes().into(),
+    //             verify_token: (&verify_token[..]).into(),
+    //         },
+    //         encoder,
+    //     )
+    //     .await?;
 
-    conn.write_half.flush().await?;
+    // conn.write_half.flush().await?;
 
-    let secret = if let SbLogin::EncryptionResponse19(packet) =
-        SbLogin::parse(conn.read_half.read_encoded().await?.into_packet()?, version)?
-    {
-        let packet: EncryptionResponse19 = packet;
-        if &priv_key.decrypt(Pkcs1v15Encrypt, &packet.verify_token)? != &verify_token {
-            bail!("verify token corrupted!")
-        }
-        priv_key.decrypt(Pkcs1v15Encrypt, &packet.secret)?
-    } else {
-        bail!("incorrect packet order")
-    };
+    // let secret = if let SbLogin::EncryptionResponse19(packet) =
+    //     SbLogin::parse(conn.read_half.read_encoded().await?.into_packet()?, version)?
+    // {
+    //     let packet: EncryptionResponse19 = packet;
+    //     if &priv_key.decrypt(Pkcs1v15Encrypt, &packet.verify_token)? != &verify_token {
+    //         bail!("verify token corrupted!")
+    //     }
+    //     priv_key.decrypt(Pkcs1v15Encrypt, &packet.secret)?
+    // } else {
+    //     bail!("incorrect packet order")
+    // };
 
-    let mut hash: Sha1 = Sha1::new();
-    hash.update(b"");
-    hash.update(&secret);
-    hash.update(pub_key.as_bytes());
-    let hash = BigInt::from_signed_bytes_be(hash.finalize().as_ref()).to_str_radix(16);
-    let resp = isahc::get_async(format!(
-        "https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={hash}",
-    ))
-    .await?;
-    if !(StatusCode::OK == resp.status()) {
-        bail!(
-            "request to sessionserver failed with status code: {}",
-            resp.status()
-        )
-    }
-    let mut body = String::new();
-    resp.into_body().read_to_string(&mut body).await?;
+    // let mut hash: Sha1 = Sha1::new();
+    // hash.update(b"");
+    // hash.update(&secret);
+    // hash.update(pub_key.as_bytes());
+    // let hash = BigInt::from_signed_bytes_be(hash.finalize().as_ref()).to_str_radix(16);
+    // let resp = isahc::get_async(format!(
+    //     "https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={hash}",
+    // ))
+    // .await?;
+    // if !(StatusCode::OK == resp.status()) {
+    //     bail!(
+    //         "request to sessionserver failed with status code: {}",
+    //         resp.status()
+    //     )
+    // }
+    // let mut body = String::new();
+    // resp.into_body().read_to_string(&mut body).await?;
 
-    let json = serde_json::Value::from_str(&body)?;
+    // let json = serde_json::Value::from_str(&body)?;
 
-    let uuid = Uuid::from_str(
-        json.get("id")
-            .map_or(Err(anyhow!("uuid not present in response")), |v| Ok(v))?
-            .as_str()
-            .map_or(Err(anyhow!("uuid is not string")), |v| Ok(v))?,
-    )?;
+    // let uuid = Uuid::from_str(
+    //     json.get("id")
+    //         .map_or(Err(anyhow!("uuid not present in response")), |v| Ok(v))?
+    //         .as_str()
+    //         .map_or(Err(anyhow!("uuid is not string")), |v| Ok(v))?,
+    // )?;
 
-    let test = json.get("id")
-    .map_or(Err(anyhow!("uuid not present in response")), |v| Ok(v))?
-    .as_str()
-    .map_or(Err(anyhow!("uuid is not string")), |v| Ok(v))?;
-    dbg!(test);
+    // let test = json.get("id")
+    // .map_or(Err(anyhow!("uuid not present in response")), |v| Ok(v))?
+    // .as_str()
+    // .map_or(Err(anyhow!("uuid is not string")), |v| Ok(v))?;
+    // dbg!(test);
 
-    conn.enable_encryption(secret.as_ref())?;
+    // conn.enable_encryption(secret.as_ref())?;
 
-    conn.write_half
-        .write_packet(version, SetCompression27 { threshold: -1 }, encoder)
-        .await?;
-    dbg!(uuid);
+    // conn.write_half
+    //     .write_packet(version, SetCompression27 { threshold: -1 }, encoder)
+    //     .await?;
+    // conn.write_half.enable_compression(1);
+    // dbg!(uuid);
     conn.write_half
         .write_packet(
             version,
             Success0 {
                 username: (&username).into(),
-                uuid: StringUuid::from(uuid),
+                uuid: StringUuid::from(Uuid::from_bytes([
+                    0xa1, 0xa2, 0xa3, 0xa4, 0xb1, 0xb2, 0xa1, 0xa2, 0xa3, 0xa4, 0xb1, 0xb2, 0xa1,
+                    0xa2, 0xa3, 0xa4,
+                ])),
             },
             encoder,
         )
@@ -241,10 +254,13 @@ async fn login(
         .unwrap();
 
     conn.write_half.flush().await?;
-
     println!("{username} logged in!");
+    println!("success0");
+
+    std::thread::sleep(core::time::Duration::from_secs(2));
+
     let (mut read, mut write) = conn.split();
-    
+
     write
         .write_packet(
             version,
@@ -262,6 +278,9 @@ async fn login(
         )
         .await?;
     write.flush().await?;
+
+    println!("joingame29");
+    std::thread::sleep(core::time::Duration::from_secs(2));
 
     write
         .write_packet(version, SpawnPosition6 { x: 0, z: 0, y: 60 }, encoder)
@@ -288,29 +307,42 @@ async fn login(
     write
         .write_packet(
             version,
-            PlayerPositionAndLook10 {
+            PositionAndLook6 {
                 x: 0.0,
                 y: 60.0,
                 z: 0.0,
                 yaw: 0.0,
                 pitch: 0.0,
-                on_ground: false,
+                relativity: miners::protocol::netty::play::clientbound::PositionAndLookBitfield6 {
+                    x: false,
+                    y: false,
+                    z: false,
+                    pitch: false,
+                    yaw: false,
+                },
             },
             encoder,
         )
         .await?;
     write.flush().await?;
-    
+
     let mut chunk_data = Vec::<u8>::new();
     chunk.encode(&mut chunk_data)?;
 
-    write.write_packet(version, ChunkData27 {
-        chunk_x: 0,
-        chunk_y: 0,
-        continuous: true,
-        primary_bitmap: chunk.primary_bitmap(),
-        data: chunk_data.into(),
-    }, encoder).await.unwrap();
+    write
+        .write_packet(
+            version,
+            ChunkData27 {
+                chunk_x: 0,
+                chunk_y: 0,
+                continuous: true,
+                primary_bitmap: chunk.primary_bitmap(),
+                data: chunk_data.into(),
+            },
+            encoder,
+        )
+        .await
+        .unwrap();
     write.flush().await?;
 
     dbg!("test");
