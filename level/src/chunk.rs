@@ -14,9 +14,15 @@ mod util {
         (val >> idx) & 0b1 != 0
     }
 
+    macro_rules! assign_ref {
+        ($t:ty, $src:ident) => {
+            util::_assign_ref::<{ std::mem::size_of::<$t>() }, $t>($src)      
+        };
+    }
+
     /// # Safety
     /// `src` should be allocated properly, initialised, and no other references should point to it
-    pub unsafe fn assign_ref<'a, const N: usize, T>(src: &mut *mut u8) -> NonNull<T> {
+    pub unsafe fn _assign_ref<'a, const N: usize, T>(src: &mut *mut u8) -> NonNull<T> {
         let p = src.cast() as *mut [u8; N];
         *src = src.add(N);
         NonNull::new_unchecked(p.cast())
@@ -216,6 +222,7 @@ mod util {
     pub(super) use opt_getter;
     pub(super) use reallocate_fn;
     pub(super) use impl_clone;
+    pub(super) use assign_ref;
 }
 
 pub struct ChunkColumn47 {
@@ -276,7 +283,6 @@ impl ChunkColumn47 {
 impl ChunkColumn47 {
     /// Parses 1.8 anvil chunk nbt data into a `ChunkColumn49`. This function does not take an entire region file as input, but one of the chunks contained within.
     pub fn from_nbt(nbt: &miners::nbt::Compound, skylight: bool) -> Option<Self> {
-        //TODO: Fix pointer nonsense
         //TODO: Return Result and not Option.
         let nbt = nbt.get("Level")?.as_compound()?;
 
@@ -376,6 +382,7 @@ impl ChunkColumn47 {
     });
 }
 
+#[derive(Debug)]
 pub struct ChunkSection47 {
     blocks: NonNull<BlockArray49<4096>>,
     light: NonNull<HalfByteArray<2048>>,
@@ -400,14 +407,14 @@ impl Encode for ChunkSection47 {
 impl ChunkSection47 {
     pub(self) unsafe fn new(p: &mut *mut u8, skylight: bool) -> Self {
         ChunkSection47 {
-            blocks: util::assign_ref::<4096, BlockArray49<4096>>(p),
-            light: util::assign_ref::<2048, HalfByteArray<2048>>(p),
+            blocks: util::assign_ref!(BlockArray49<4096>, p),
+            light: util::assign_ref!(HalfByteArray<2048>, p),
             skylight: if skylight {
-                Some(util::assign_ref::<2048, HalfByteArray<2048>>(p))
+                Some(util::assign_ref!(HalfByteArray<2048>, p))
             } else {
                 None
             },
-            biomes: util::assign_ref::<256, ByteArray<256>>(p),
+            biomes: util::assign_ref!(ByteArray<256>, p)
         }
     }
 }
@@ -609,20 +616,20 @@ pub struct ChunkSection0 {
 impl ChunkSection0 {
     unsafe fn new(p: &mut *mut u8, skylight: bool, add: bool) -> Self {
         Self {
-            blocks: util::assign_ref::<4096, ByteArray<4096>>(p),
-            metadata: util::assign_ref::<2048, HalfByteArray<2048>>(p),
-            light: util::assign_ref::<2048, HalfByteArray<2048>>(p),
+            blocks: util::_assign_ref::<4096, ByteArray<4096>>(p),
+            metadata: util::_assign_ref::<2048, HalfByteArray<2048>>(p),
+            light: util::_assign_ref::<2048, HalfByteArray<2048>>(p),
             skylight: if skylight {
-                Some(util::assign_ref::<2048, HalfByteArray<2048>>(p))
+                Some(util::_assign_ref::<2048, HalfByteArray<2048>>(p))
             } else {
                 None
             },
             add: if add {
-                Some(util::assign_ref::<2048, HalfByteArray<2048>>(p))
+                Some(util::_assign_ref::<2048, HalfByteArray<2048>>(p))
             } else {
                 None
             },
-            biomes: util::assign_ref::<256, ByteArray<256>>(p),
+            biomes: util::_assign_ref::<256, ByteArray<256>>(p),
         }
     }
 }
@@ -745,7 +752,7 @@ mod tests {
     mod pv49 {
         use std::io::Cursor;
 
-        use miners::{encoding::Decode, nbt};
+        use miners::{encoding::{Decode, Encode}, nbt};
 
         use crate::chunk::ChunkColumn47;
 
@@ -754,7 +761,10 @@ mod tests {
             let data = include_bytes!("../test_data/testchunk.nbt");
             let nbt = nbt::Nbt::decode(&mut Cursor::new(data)).unwrap();
             let chunk = ChunkColumn47::from_nbt(&nbt, true).unwrap();
-            let _ = chunk.clone();
+            let clone = chunk.clone();
+            let mut buf = Vec::new();
+            clone.encode(&mut buf).unwrap();
+            panic!()
         }
     }
 }
