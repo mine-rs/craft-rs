@@ -1,39 +1,29 @@
-use std::{mem::MaybeUninit, ptr::NonNull};
+use std::ptr::NonNull;
 
+use bumpalo::Bump;
 use miners::{
     encoding::{Decode, Encode},
     nbt::List,
 };
 
-use crate::containers::{Block49, BlockArray49, ByteArray, HalfByteArray, ReadContainer};
+use crate::containers::{Block47, BlockArray47, ByteArray, HalfByteArray, ReadContainer};
+
+use self::util::{create, impl_clone};
 
 mod util {
+    //TODO: rename
+    macro_rules! create {
+        ($t:ty, $buf:ident, $data:ident) => {{
+            let slice = $buf.alloc_slice_copy(&$data[..std::mem::size_of::<$t>()]);
+            *$data = &$data[std::mem::size_of::<$t>()..];
+            NonNull::new(<&mut $t>::try_from(slice).unwrap()).unwrap()
+        }};
+    }
+
     #[inline]
     pub const fn bit_at(val: u16, idx: u8) -> bool {
         debug_assert!((idx <= 0x0f));
         (val >> idx) & 0b1 != 0
-    }
-
-    macro_rules! assign_ref {
-        ($t:ty, $src:ident) => {
-            util::_assign_ref::<{ std::mem::size_of::<$t>() }, $t>($src)      
-        };
-    }
-
-    /// # Safety
-    /// `src` should be allocated properly, initialised, and no other references should point to it
-    pub unsafe fn _assign_ref<'a, const N: usize, T>(src: &mut *mut u8) -> NonNull<T> {
-        let p = src.cast() as *mut [u8; N];
-        *src = src.add(N);
-        NonNull::new_unchecked(p.cast())
-    }
-
-    /// Creates a buffer with the supplied size.
-    pub fn create_buffer(size: usize) -> *mut u8 {
-        let mut vec = Vec::<u8>::with_capacity(size);
-        let data = vec.as_mut_ptr();
-        std::mem::forget(vec);
-        data
     }
 
     macro_rules! getter {
@@ -72,83 +62,51 @@ mod util {
         };
     }
 
-    /// Used to generate reallocate functions for the 0 and 49 protocol versions.
-    macro_rules! reallocate_fn {
-        ($section_t:ty, | $self:ident, $p:ident, $section:ident | $e:expr) => {
-            /// Reallocates the internal buffer extending it with `extend` and returning a reference to the part of the buffer that was just added.
-            pub fn reallocate<'a>(&'a mut $self, extend: usize) -> &'a mut [MaybeUninit<u8>] {
-                assert!(extend != 0);
-
-                let new = $crate::chunk::util::create_buffer($self.size + extend);
-
-                let mut sections: [Option<$section_t>; 16] = [
-                    None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-                    None, None,
-                ];
-
-                if let Some(buf) = $self.buf {
-                    // SAFETY: This is fine because we know self.buf is initialised and new and self.buf don't overlap.
-                    unsafe { std::ptr::copy_nonoverlapping(buf.as_ptr(), new, $self.size) };
-                    let mut $p = new;
-
-                    for (i, section) in $self.sections.iter().enumerate() {
-                        if let Some($section) = section {
-                            let section = $e;
-                            sections[i] = Some(section)
-                        }
-                    }
-                }
-
-                let this = Self {
-                    // SAFETY: This is safe because we know new isn't a null pointer.
-                    buf: unsafe { Some(NonNull::new_unchecked(new)) },
-                    size: $self.size + extend,
-                    skylight: $self.skylight,
-                    sections,
-                };
-
-                let old_size = $self.size;
-                *$self = this;
-
-                // SAFETY: This is sound because we're using `MaybeUninit<u8>` and we know the memory has been allocated.
-                unsafe { std::slice::from_raw_parts_mut(new.add(old_size).cast(), extend) }
-
-            }
-        };
+    macro_rules! void {
+        ($_:tt, $e:expr) => {
+            $e
+        }
     }
 
-    /// Used to implement clone for the 0 and 49 protocol versions
-    //TODO: Less code duplication with reallocate_fn (so probably add an underlying method that basically clones but also can extend the buffer which is then called by the clone and reallocate implementation)
+    /// Used to implement clone for the 0 and 47 protocol versions
     macro_rules! impl_clone {
-        ($column_t:ty, $section_t:ty, | $self:ident, $p:ident, $section:ident | $e:expr) => {
+        ($column_t:ty, $section_t:ty $(, $marker:tt)?) => {
             impl Clone for $column_t {
-                fn clone(&$self) -> Self {
-                    let new = $crate::chunk::util::create_buffer($self.size);
-
+                fn clone(&self) -> Self {
+                    let buf = Bump::with_capacity(self.size);
                     let mut sections: [Option<$section_t>; 16] = [
                         None, None, None, None, None, None, None, None, None, None, None, None, None, None,
                         None, None,
                     ];
-    
-                    if let Some(buf) = $self.buf {
-                        // SAFETY: This is fine because we know self.buf is initialised and new and self.buf don't overlap.
-                        unsafe { std::ptr::copy_nonoverlapping(buf.as_ptr(), new, $self.size) };
-                        let mut $p = new;
-    
-                        for (i, section) in $self.sections.iter().enumerate() {
-                            if let Some($section) = section {
-                                let section = $e;
-                                sections[i] = Some(section)
-                            }
-                        }
+                    for (i, section) in self
+                        .sections
+                        .iter()
+                        .enumerate()
+                        .flat_map(|(i, section)| section.into_iter().map(move |x| (i, x)))
+                    {
+                        sections[i] = Some(<$section_t>::from_slices(
+                            buf.alloc_slice_copy(section.blocks().as_ref()),
+                            $(util::void!($marker, buf.alloc_slice_copy(section.metadata().as_ref())),)?
+                            buf.alloc_slice_copy(section.light().as_ref()),
+                            section.skylight().map(|v| buf.alloc_slice_copy(v.as_ref())),
+                            $(util::void!($marker, section.add().map(|v| buf.alloc_slice_copy(v.as_ref()))),)?
+                        ))
                     }
-    
+            
+                    let biomes = NonNull::new(
+                        <&mut ByteArray<256>>::try_from(
+                            buf.alloc_slice_copy(unsafe { self.biomes.as_ref() }.as_ref()),
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap();
+            
                     Self {
-                        // SAFETY: This is safe because we know new isn't a null pointer.
-                        buf: unsafe { Some(NonNull::new_unchecked(new)) },
-                        size: $self.size,
-                        skylight: $self.skylight,
+                        buf,
+                        size: self.size,
+                        skylight: self.skylight,
                         sections,
+                        biomes,
                     }
                 }
             }
@@ -156,7 +114,7 @@ mod util {
     }
 
     macro_rules! from_reader_fn {
-        ($section:ty, | $p:ident, $skylight:ident | $e:expr $(, $add:ident, $t:ty)?) => {
+        ($section:ty, | $buf:ident, $data:ident, $skylight:ident | $e:expr $(, $add:ident, $t:ty)?) => {
             pub fn from_reader(
                 cursor: &mut std::io::Cursor<&[u8]>,
                 $skylight: bool,
@@ -172,7 +130,7 @@ mod util {
                     }
                 }
 
-                let data = {
+                let mut $data = {
                     let pos = cursor.position() as usize;
                     let slice = cursor
                         .get_ref()
@@ -183,17 +141,14 @@ mod util {
                     slice
                 };
 
-                let buf = util::create_buffer(size);
+                let $buf = Bump::with_capacity(size);
                 // Copy the data over to the buffer
-
-                // Safety: This is safe because the buf is properly allocated, and data is properly initialised for the amount of bytes copied over.
-                unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), buf, size) };
 
                 let mut sections: [Option<$section>; 16] = [
                     None, None, None, None, None, None, None, None, None, None, None, None, None, None,
                     None, None,
                 ];
-                let mut $p = buf;
+
                 for i in 0u8..16 {
                     let exists: bool = $crate::chunk::util::bit_at(bitmask, i);
                     if exists {
@@ -203,250 +158,94 @@ mod util {
                         sections[i as usize] = Some(section)
                     }
                 }
+
+                let biomes = NonNull::new(<&mut ByteArray<256>>::try_from($buf.alloc_slice_copy($data)).unwrap()).unwrap();
+
                 Ok(Self {
                     // Safety: This is safe because buf isn't a null pointer.
-                    buf: unsafe { Some(NonNull::new_unchecked(buf)) },
+                    $buf,
                     size,
                     $skylight,
                     // Safety: The compiler thinks `sections` is bound by the lifetime of the cursor slice, but it isn't because we copied the data over to a new buffer.
                     sections: unsafe { std::mem::transmute(sections) },
+                    biomes,
                 })
             }
         };
     }
 
-    use std::ptr::NonNull;
-
+    pub(super) use create;
     pub(super) use from_reader_fn;
     pub(super) use getter;
-    pub(super) use opt_getter;
-    pub(super) use reallocate_fn;
     pub(super) use impl_clone;
-    pub(super) use assign_ref;
-}
-
-pub struct ChunkColumn47 {
-    buf: Option<NonNull<u8>>,
-    size: usize,
-    skylight: bool,
-    sections: [Option<ChunkSection47>; 16],
-}
-
-// Safety: This is safe because no data races can occur since the mutable pointers are only written to when &mut self is passed.
-unsafe impl Sync for ChunkColumn47 {}
-// Safety: ^
-unsafe impl Send for ChunkColumn47 {}
-
-util::impl_clone!(ChunkColumn47, ChunkSection47, |self, p, _section| {
-    // Safety: This is safe because `p` is properly initialised and allocated inside of the macro.
-    unsafe { ChunkSection47::new(&mut p, self.skylight) }
-});
-
-impl Encode for ChunkColumn47 {
-    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
-        for section in self.sections.iter().flatten() {
-            section.encode(writer)?
-        }
-        Ok(())
-    }
-}
-
-
-impl ChunkColumn47 {
-    /// Gets a reference to the section if it exists.
-    pub fn section(&self, section: usize) -> Option<&ChunkSection47> {
-        if let Some(ref section) = self.sections[section] {
-            Some(section)
-        } else {
-            None
-        }
-    }
-
-    /// Gets a mutable reference to the section if it exists.
-    pub fn section_mut(&mut self, section: usize) -> Option<&mut ChunkSection47> {
-        if let Some(ref mut section) = self.sections[section] {
-            Some(section)
-        } else {
-            None
-        }
-    }
-
-    pub fn primary_bitmap(&self) -> u16 {
-        let mut bitmap = 0u16;
-        for (i, _) in self.sections.iter().enumerate().flat_map(|(i, section)| section.into_iter().map(move |x| (i, x))) {
-            bitmap |= 1 << i
-        }
-        bitmap
-    }
-}
-
-impl ChunkColumn47 {
-    /// Parses 1.8 anvil chunk nbt data into a `ChunkColumn49`. This function does not take an entire region file as input, but one of the chunks contained within.
-    pub fn from_nbt(nbt: &miners::nbt::Compound, skylight: bool) -> Option<Self> {
-        //TODO: Return Result and not Option.
-        let nbt = nbt.get("Level")?.as_compound()?;
-
-        let sections_data = {
-            let List::Compound(sections) = nbt.get("Sections")?.as_list()? else {
-                return None;
-            };
-            sections
-        };
-
-        let mut sections: [Option<ChunkSection47>; 16] = [
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None,
-        ];
-        let size: usize = Self::section_size(skylight) * sections_data.len();
-        let mut buf = Vec::with_capacity(size);
-
-        let mut p = buf.as_mut_ptr();
-        for section in sections_data.iter() {
-            let light = section.get("BlockLight")?.as_byte_array()?;
-            if light.len() != 2048 {
-                return None;
-            }
-            buf.extend_from_slice(light);
-            let blocks = section.get("Blocks")?.as_byte_array()?;
-            if blocks.len() != 4096 {
-                return None;
-            }
-            let metadata = section.get("Data")?.as_byte_array()?;
-            if metadata.len() != 2048 {
-                return None;
-            }
-            //let metadata = <&HalfByteArray<2048>>::from(std::mem::transmute::<*const u8, &[u8; 2048]>(metadata.as_ptr()));
-            let metadata: &[u8; 2048] = metadata[..2048].try_into().unwrap();
-            let metadata = <&HalfByteArray<2048>>::from(metadata);
-
-            for i in 0..4096 {
-                let block = Block49::new(blocks[i] as u16, metadata.get(i));
-                buf.extend_from_slice(block.as_slice());
-            }
-            if skylight {
-                let skylight = section.get("SkyLight")?.as_byte_array()?;
-                if skylight.len() != 2048 {
-                    return None;
-                }
-                buf.extend_from_slice(&skylight);
-            }
-            *sections.get_mut(section.get("Y")?.as_byte()? as usize)? =
-                Some(unsafe { ChunkSection47::new(&mut p, skylight) });
-        }
-
-        let buf_ptr = buf.as_mut_ptr();
-
-        // std::mem::forget the vec to prevent the buffer from being deallocated.
-        std::mem::forget(buf);
-
-        Some(Self {
-            size,
-            sections,
-            // Safety: This is safe because buf isn't a null pointer.
-            buf: Some(unsafe { NonNull::new_unchecked(buf_ptr) }),
-            skylight,
-        })
-    }
-
-    pub(crate) const fn section_size(skylight: bool) -> usize {
-        use std::mem::size_of;
-        size_of::<BlockArray49<4096>>()
-            + size_of::<HalfByteArray<2048>>()
-            + if skylight {
-                size_of::<HalfByteArray<2048>>()
-            } else {
-                0
-            }
-            + size_of::<ByteArray<256>>()
-        //8196 + 2048 + if skylight { 2048 } else { 0 } + 256
-    }
-
-    pub fn insert_section(&mut self, i: usize, skylight: bool) {
-        assert!(self.sections[i].is_none());
-        let size = Self::section_size(skylight);
-        let mut p: *mut u8 = self.reallocate(size).as_mut_ptr().cast();
-        // Safety: This is safe because we know p was allocated for size.
-        unsafe { p.write_bytes(0, size) }
-        // Safety: This is safe because p was allocated and initialised correctly.
-        self.sections[i] = unsafe { Some(ChunkSection47::new(&mut p, skylight)) };
-    }
-
-    util::reallocate_fn!(ChunkSection47, |self, p, _section| {
-        // Safety: This is safe because `p` is properly initialised and allocated inside of the macro.
-        unsafe { ChunkSection47::new(&mut p, self.skylight) }
-    });
-
-    util::from_reader_fn!(ChunkSection47, |p, skylight| {
-        // Safety: This is safe because `p` is properly initialised and allocated inside of the macro.
-        unsafe { ChunkSection47::new(&mut p, skylight) }
-    });
-}
-
-#[derive(Debug)]
-pub struct ChunkSection47 {
-    blocks: NonNull<BlockArray49<4096>>,
-    light: NonNull<HalfByteArray<2048>>,
-    skylight: Option<NonNull<HalfByteArray<2048>>>,
-    biomes: NonNull<ByteArray<256>>,
-}
-
-impl Encode for ChunkSection47 {
-    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
-        unsafe {
-            writer.write_all(self.blocks.as_ref().as_ref())?;
-            writer.write_all(self.light.as_ref().as_ref())?;
-            if let Some(skylight) = &self.skylight {
-                writer.write_all(skylight.as_ref().as_ref())?;
-            }
-            writer.write_all(self.biomes.as_ref().as_ref())?;
-            Ok(())
-        }
-    }
-}
-
-impl ChunkSection47 {
-    pub(self) unsafe fn new(p: &mut *mut u8, skylight: bool) -> Self {
-        ChunkSection47 {
-            blocks: util::assign_ref!(BlockArray49<4096>, p),
-            light: util::assign_ref!(HalfByteArray<2048>, p),
-            skylight: if skylight {
-                Some(util::assign_ref!(HalfByteArray<2048>, p))
-            } else {
-                None
-            },
-            biomes: util::assign_ref!(ByteArray<256>, p)
-        }
-    }
-}
-
-impl ChunkSection47 {
-    util::getter!(blocks, blocks_mut, BlockArray49<4096>);
-    util::getter!(light, light_mut, HalfByteArray<2048>);
-    util::opt_getter!(skylight, skylight_mut, HalfByteArray<2048>);
-    util::getter!(biomes, biomes_mut, ByteArray<256>);
-}
-
-/// A chunk column, not including heightmaps
-pub struct ChunkColumn<const N: usize, S> {
-    pub sections: [Option<S>; N],
+    pub(super) use opt_getter;
+    pub(super) use void;
 }
 
 pub struct ChunkColumn0 {
-    buf: Option<NonNull<u8>>,
+    buf: Bump,
     size: usize,
     skylight: bool,
     sections: [Option<ChunkSection0>; 16],
+    biomes: NonNull<ByteArray<256>>,
 }
+
+impl_clone!(ChunkColumn0, ChunkSection0, ());
+
+/*
+impl Clone for ChunkColumn0 {
+    fn clone(&self) -> Self {
+        let buf = Bump::with_capacity(self.size);
+        let mut sections: [Option<ChunkSection0>; 16] = [
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None,
+        ];
+        for (i, section) in self
+            .sections
+            .iter()
+            .enumerate()
+            .flat_map(|(i, section)| section.into_iter().map(move |x| (i, x)))
+        {
+            sections[i] = Some(ChunkSection0::from_slices(
+                buf.alloc_slice_copy(section.blocks().as_ref()),
+                buf.alloc_slice_copy(section.metadata().as_ref()),
+                buf.alloc_slice_copy(section.light().as_ref()),
+                section.skylight().map(|v| buf.alloc_slice_copy(v.as_ref())),
+                section.add().map(|v| buf.alloc_slice_copy(v.as_ref())),
+            ))
+        }
+
+        let biomes = NonNull::new(
+            <&mut ByteArray<256>>::try_from(
+                buf.alloc_slice_copy(unsafe { self.biomes.as_ref() }.as_ref()),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        Self {
+            buf,
+            size: self.size,
+            skylight: self.skylight,
+            sections,
+            biomes,
+        }
+    }
+}
+*/
 
 // Safety: This is safe because no data races can occur since the mutable pointers are only written to when &mut self is passed.
 unsafe impl Sync for ChunkColumn0 {}
 // Safety: ^
 unsafe impl Send for ChunkColumn0 {}
 
-util::impl_clone!(ChunkColumn0, ChunkSection0, |self, p, section| {
-    // Safety: This is safe because `p` is properly initialised and allocated inside of the macro.
-    unsafe { ChunkSection0::new(&mut p, self.skylight, section.add.is_some()) }
-});
+/*
+impl Default for ChunkColumn0 {
+    fn default() -> Self {
+        Self::new(true)
+    }
+}
+*/
 
 impl Encode for ChunkColumn0 {
     // This implementation only writes the chunk data, not the metadata.
@@ -456,36 +255,32 @@ impl Encode for ChunkColumn0 {
             // TODO: add a way for the user to specify the compression level.
             section.encode(&mut compression)?;
         }
+        unsafe { self.biomes.as_ref().encode(&mut compression)? };
         compression.flush_finish()?;
         Ok(())
     }
 }
 
-impl Default for ChunkColumn0 {
-    fn default() -> Self {
-        Self::new(true)
-    }
-}
-
 impl ChunkColumn0 {
+    /*
     /// Constructs a new `ChunkColumn0`, doesn't allocate.
     pub fn new(skylight: bool) -> Self {
         Self {
-            buf: None,
+            buf: Bump::new(),
             size: 0,
             skylight,
             sections: [
                 None, None, None, None, None, None, None, None, None, None, None, None, None, None,
                 None, None,
             ],
+            biomes: todo!()
         }
-    }
+    }*/
 
     util::from_reader_fn!(
         ChunkSection0,
-        |p, skylight| {
-            // Safety: This is safe because `p` is properly initialised and allocated inside of the macro.
-            unsafe { ChunkSection0::new(&mut p, skylight, add) }
+        |buf, data, skylight| {
+            ChunkSection0::new(&buf, &mut data, skylight, add)
         },
         add,
         u16
@@ -495,32 +290,24 @@ impl ChunkColumn0 {
     pub fn insert_section(&mut self, section: usize, add: bool) {
         assert!(self.sections[section].is_none());
         let size = Self::section_size(self.skylight, add);
-        let mut p: *mut u8 = self.reallocate(size).as_mut_ptr().cast();
-        // zero-initialise the buffer
-        // SAFETY: This is fine because we know `p` has been allocated for `size`.
-        unsafe { p.write_bytes(0, size) };
-        // Safety: This is safe because `p` is allocated and initialised correctly.
-        self.sections[section] = unsafe { Some(ChunkSection0::new(&mut p, self.skylight, add)) };
+        self.buf.alloc_slice_fill_with(size, |_| 0);
+        self.sections[section] = Some(ChunkSection0::new_zeroed(&self.buf, self.skylight));
+        self.size += size;
     }
 
     pub fn insert_add(&mut self, section: usize) {
-        let p: *mut u8 = self.reallocate(2048).as_mut_ptr().cast();
-        // zero-initialise the buffer
-        // SAFETY: This is fine because we know `p` has been allocated for `size`.
-        unsafe { p.write_bytes(0, 2048) };
         if let Some(section) = &mut self.sections[section] {
             assert!(section.add.is_none());
-            // Safety: This is safe because p is allocated and zero-initialised for 2048 bytes.
-            section.add = unsafe { Some(NonNull::new_unchecked(p.cast())) }
+            section.add = Some(NonNull::new(
+                <&mut HalfByteArray<2048>>::try_from(self.buf.alloc_slice_fill_with(2048, |_| 0))
+                    .unwrap(),
+            ))
+            .unwrap();
+            self.size += 2048
         } else {
             panic!("chunk section does not exist")
         }
     }
-
-    util::reallocate_fn!(ChunkSection0, |self, p, section| {
-        // Safety: This is safe because `p` is properly initialised and allocated inside of the macro.
-        unsafe { ChunkSection0::new(&mut p, self.skylight, section.add.is_some()) }
-    });
 
     /// Returns a bool indicating if this column stores sky light data.
     pub fn skylight(&self) -> bool {
@@ -593,16 +380,6 @@ impl<'a> ChunkColumn0 {
     }
 }
 
-impl<'a> Drop for ChunkColumn0 {
-    fn drop(&mut self) {
-        if let Some(buf) = self.buf {
-            // SAFETY: This is fine because the buffer was allocated with `Vec`.
-            let vec = unsafe { Vec::<u8>::from_raw_parts(buf.as_ptr(), self.size, self.size) };
-            drop(vec)
-        }
-    }
-}
-
 #[repr(C)]
 pub struct ChunkSection0 {
     blocks: NonNull<ByteArray<4096>>,
@@ -610,26 +387,76 @@ pub struct ChunkSection0 {
     light: NonNull<HalfByteArray<2048>>,
     skylight: Option<NonNull<HalfByteArray<2048>>>,
     add: Option<NonNull<HalfByteArray<2048>>>,
-    biomes: NonNull<ByteArray<256>>,
 }
 
 impl ChunkSection0 {
-    unsafe fn new(p: &mut *mut u8, skylight: bool, add: bool) -> Self {
+    fn new(buf: &Bump, data: &mut &[u8], skylight: bool, add: bool) -> Self {
         Self {
-            blocks: util::_assign_ref::<4096, ByteArray<4096>>(p),
-            metadata: util::_assign_ref::<2048, HalfByteArray<2048>>(p),
-            light: util::_assign_ref::<2048, HalfByteArray<2048>>(p),
+            blocks: create!(ByteArray<4096>, buf, data),
+            metadata: create!(HalfByteArray<2048>, buf, data),
+            light: create!(HalfByteArray<2048>, buf, data),
             skylight: if skylight {
-                Some(util::_assign_ref::<2048, HalfByteArray<2048>>(p))
+                Some(create!(HalfByteArray<2048>, buf, data))
             } else {
                 None
             },
             add: if add {
-                Some(util::_assign_ref::<2048, HalfByteArray<2048>>(p))
+                Some(create!(HalfByteArray<2048>, buf, data))
             } else {
                 None
             },
-            biomes: util::_assign_ref::<256, ByteArray<256>>(p),
+        }
+    }
+
+    fn from_slices(
+        blocks: &mut [u8],
+        metadata: &mut [u8],
+        light: &mut [u8],
+        skylight: Option<&mut [u8]>,
+        add: Option<&mut [u8]>,
+    ) -> Self {
+        Self {
+            blocks: NonNull::new(<&mut ByteArray<4096>>::try_from(blocks).unwrap()).unwrap(),
+            metadata: NonNull::new(<&mut HalfByteArray<2048>>::try_from(metadata).unwrap())
+                .unwrap(),
+            light: NonNull::new(<&mut HalfByteArray<2048>>::try_from(light).unwrap()).unwrap(),
+            skylight: skylight
+                .map(|v| NonNull::new(<&mut HalfByteArray<2048>>::try_from(v).unwrap()).unwrap()),
+            add: add
+                .map(|v| NonNull::new(<&mut HalfByteArray<2048>>::try_from(v).unwrap()).unwrap()),
+        }
+    }
+
+    fn new_zeroed(buf: &Bump, skylight: bool) -> Self {
+        Self {
+            blocks: NonNull::new(
+                <&mut ByteArray<4096>>::try_from(buf.alloc_slice_fill_with(4096, |_| 0)).unwrap(),
+            )
+            .unwrap(),
+            metadata: NonNull::new(
+                <&mut HalfByteArray<2048>>::try_from(buf.alloc_slice_fill_with(2048, |_| 0))
+                    .unwrap(),
+            )
+            .unwrap(),
+            light: NonNull::new(
+                <&mut HalfByteArray<2048>>::try_from(buf.alloc_slice_fill_with(2048, |_| 0))
+                    .unwrap(),
+            )
+            .unwrap(),
+            skylight: if skylight {
+                Some(
+                    NonNull::new(
+                        <&mut HalfByteArray<2048>>::try_from(
+                            buf.alloc_slice_fill_with(2048, |_| 0),
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap(),
+                )
+            } else {
+                None
+            },
+            add: None,
         }
     }
 }
@@ -647,7 +474,6 @@ impl Encode for ChunkSection0 {
             if let Some(add) = &self.add {
                 writer.write_all(add.as_ref().as_ref())?;
             }
-            writer.write_all(self.biomes.as_ref().as_ref())?;
             Ok(())
         }
     }
@@ -659,10 +485,310 @@ impl ChunkSection0 {
     util::getter!(light, light_mut, HalfByteArray<2048>);
     util::opt_getter!(skylight, skylight_mut, HalfByteArray<2048>);
     util::opt_getter!(add, add_mut, HalfByteArray<2048>);
-    util::getter!(biomes, biomes_mut, ByteArray<256>);
 }
 
+pub struct ChunkColumn47 {
+    buf: Bump,
+    size: usize,
+    skylight: bool,
+    sections: [Option<ChunkSection47>; 16],
+    biomes: NonNull<ByteArray<256>>,
+}
+
+impl_clone!(ChunkColumn47, ChunkSection47);
+
+// Safety: This is safe because no data races can occur since the mutable pointers are only written to when &mut self is passed.
+unsafe impl Sync for ChunkColumn47 {}
+// Safety: ^
+unsafe impl Send for ChunkColumn47 {}
+
+impl Encode for ChunkColumn47 {
+    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
+        for section in self.sections.iter().flatten() {
+            section.encode(writer)?;
+            unsafe { self.biomes.as_ref().encode(writer)? };
+        }
+        Ok(())
+    }
+}
+
+impl ChunkColumn47 {
+    /// Gets a reference to the section if it exists.
+    pub fn section(&self, section: usize) -> Option<&ChunkSection47> {
+        if let Some(ref section) = self.sections[section] {
+            Some(section)
+        } else {
+            None
+        }
+    }
+
+    /// Gets a mutable reference to the section if it exists.
+    pub fn section_mut(&mut self, section: usize) -> Option<&mut ChunkSection47> {
+        if let Some(ref mut section) = self.sections[section] {
+            Some(section)
+        } else {
+            None
+        }
+    }
+
+    pub fn primary_bitmap(&self) -> u16 {
+        let mut bitmap = 0u16;
+        for (i, _) in self
+            .sections
+            .iter()
+            .enumerate()
+            .flat_map(|(i, section)| section.into_iter().map(move |x| (i, x)))
+        {
+            bitmap |= 1 << i
+        }
+        bitmap
+    }
+}
+
+impl ChunkColumn47 {
+    util::from_reader_fn!(ChunkSection47, |buf, data, skylight| ChunkSection47::new(&buf, &mut data, skylight));
+/*
+    pub fn from_reader(
+        cursor: &mut std::io::Cursor<&[u8]>,
+        skylight: bool,
+        bitmask: u16,
+    ) -> miners::encoding::decode::Result<Self> {
+        let mut size = 0;
+        for i in 0u8..16 {
+            let exists: bool = util::bit_at(bitmask, i);
+            if exists {
+                size += Self::section_size(skylight)
+            }
+        }
+
+        let mut data = {
+            let pos = cursor.position() as usize;
+            let slice = cursor
+                .get_ref()
+                .get(pos..pos + size as usize)
+                .ok_or(miners::encoding::decode::Error::UnexpectedEndOfSlice)?;
+            cursor.set_position((pos + size) as u64);
+            debug_assert_eq!(slice.len(), size);
+            slice
+        };
+
+        let buf = Bump::new();
+
+        let mut sections: [Option<ChunkSection47>; 16] = [
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None,
+        ];
+
+        for i in 0..16 {
+            let exists = util::bit_at(bitmask, i as u8);
+            if exists {
+                sections[i as usize] = Some(ChunkSection47::new(&buf, &mut data, skylight))
+            }
+        }
+
+        let biomes =
+            NonNull::new(<&mut ByteArray<256>>::try_from(buf.alloc_slice_copy(data)).unwrap())
+                .unwrap();
+
+        Ok(Self {
+            buf,
+            size,
+            skylight,
+            sections,
+            biomes,
+        })
+    }
+*/
+    /// Parses 1.8 anvil chunk nbt data into a `ChunkColumn49`. This function does not take an entire region file as input, but one of the chunks contained within.
+    pub fn from_nbt(nbt: &miners::nbt::Compound, skylight: bool) -> Option<Self> {
+        //TODO: Return Result and not Option.
+        let nbt = nbt.get("Level")?.as_compound()?;
+
+        let sections_data = {
+            let List::Compound(sections) = nbt.get("Sections")?.as_list()? else {
+                return None;
+            };
+            sections
+        };
+
+        let mut sections: [Option<ChunkSection47>; 16] = [
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None,
+        ];
+        let size: usize = Self::section_size(skylight) * sections_data.len();
+        let buf = Bump::with_capacity(size);
+
+        for section in sections_data.iter() {
+            let light = section.get("BlockLight")?.as_byte_array()?;
+            if light.len() != 2048 {
+                return None;
+            }
+            let light = buf.alloc_slice_copy(light.as_ref());
+
+            let blocks = section.get("Blocks")?.as_byte_array()?;
+            if blocks.len() != 8192 {
+                return None;
+            }
+            let blocks = buf.alloc_slice_copy(blocks.as_ref());
+
+            let metadata = section.get("Data")?.as_byte_array()?;
+            if metadata.len() != 2048 {
+                return None;
+            }
+            //let metadata = <&HalfByteArray<2048>>::from(std::mem::transmute::<*const u8, &[u8; 2048]>(metadata.as_ptr()));
+            let metadata: &[u8; 2048] = metadata[..2048].try_into().unwrap();
+            let metadata = <&HalfByteArray<2048>>::from(metadata);
+
+            buf.alloc_slice_fill_with(4096, |i| Block47::new(blocks[i] as u16, metadata.get(i)));
+
+            let skylight = if skylight {
+                let skylight = section.get("SkyLight")?.as_byte_array()?;
+                if skylight.len() != 2048 {
+                    return None;
+                }
+                Some(buf.alloc_slice_copy(skylight))
+            } else {
+                None
+            };
+
+            *sections.get_mut(section.get("Y")?.as_byte()? as usize)? =
+                Some(ChunkSection47::from_slices(blocks, light, skylight));
+        }
+
+        let biomes = nbt.get("Biomes")?.as_byte_array()?;
+        if biomes.len() != 256 {
+            return None;
+        }
+        let biomes =
+            NonNull::new(<&mut ByteArray<256>>::try_from(buf.alloc_slice_copy(biomes)).unwrap())
+                .unwrap();
+
+        Some(Self {
+            size,
+            sections,
+            // Safety: This is safe because buf isn't a null pointer.
+            buf,
+            skylight,
+            biomes,
+        })
+    }
+
+    pub(crate) const fn section_size(skylight: bool) -> usize {
+        use std::mem::size_of;
+        size_of::<BlockArray47<4096>>()
+            + size_of::<HalfByteArray<2048>>()
+            + if skylight {
+                size_of::<HalfByteArray<2048>>()
+            } else {
+                0
+            }
+            + size_of::<ByteArray<256>>()
+    }
+
+    pub fn insert_section(&mut self, i: usize, skylight: bool) {
+        assert!(self.sections[i].is_none());
+        let size = Self::section_size(skylight);
+        self.buf.alloc_slice_fill_with(size, |_| 0);
+        self.sections[i] = Some(ChunkSection47::new_zeroed(&self.buf, self.skylight));
+    }
+}
+
+#[derive(Debug)]
+pub struct ChunkSection47 {
+    blocks: NonNull<BlockArray47<4096>>,
+    light: NonNull<HalfByteArray<2048>>,
+    skylight: Option<NonNull<HalfByteArray<2048>>>,
+    //biomes: NonNull<ByteArray<256>>,
+}
+
+impl Encode for ChunkSection47 {
+    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
+        unsafe {
+            writer.write_all(self.blocks.as_ref().as_ref())?;
+            writer.write_all(self.light.as_ref().as_ref())?;
+            if let Some(skylight) = &self.skylight {
+                writer.write_all(skylight.as_ref().as_ref())?;
+            }
+            //writer.write_all(self.biomes.as_ref().as_ref())?;
+            Ok(())
+        }
+    }
+}
+
+impl ChunkSection47 {
+    pub(self) fn new(buf: &bumpalo::Bump, data: &mut &[u8], skylight: bool) -> Self {
+        ChunkSection47 {
+            blocks: create!(BlockArray47<4096>, buf, data),
+            light: create!(HalfByteArray<2048>, buf, data),
+            skylight: if skylight {
+                Some(create!(HalfByteArray<2048>, buf, data))
+            } else {
+                None
+            },
+            //biomes: create!(ByteArray<256>, buf, data),
+        }
+    }
+
+    pub(self) fn new_zeroed(buf: &Bump, skylight: bool) -> Self {
+        ChunkSection47 {
+            blocks: NonNull::new(
+                <&mut BlockArray47<4096>>::try_from(buf.alloc_slice_fill_with(8192, |_| 0))
+                    .unwrap(),
+            )
+            .unwrap(),
+            light: NonNull::new(
+                <&mut HalfByteArray<2048>>::try_from(buf.alloc_slice_fill_with(2048, |_| 0))
+                    .unwrap(),
+            )
+            .unwrap(),
+            skylight: if skylight {
+                Some(
+                    NonNull::new(
+                        <&mut HalfByteArray<2048>>::try_from(
+                            buf.alloc_slice_fill_with(2048, |_| 0),
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap(),
+                )
+            } else {
+                None
+            },
+            //biomes: NonNull::new(<&mut ByteArray<256>>::try_from(buf.alloc_slice_fill_with(4096, |_| 0)).unwrap()).unwrap(),
+        }
+    }
+
+    pub(self) fn from_slices(
+        blocks: &mut [u8],
+        light: &mut [u8],
+        skylight: Option<&mut [u8]>,
+    ) -> Self {
+        Self {
+            blocks: NonNull::new(<&mut BlockArray47<4096>>::try_from(blocks).unwrap()).unwrap(),
+            light: NonNull::new(<&mut HalfByteArray<2048>>::try_from(light).unwrap()).unwrap(),
+            skylight: skylight
+                .map(|v| NonNull::new(<&mut HalfByteArray<2048>>::try_from(v).unwrap()).unwrap()),
+            //biomes: NonNull::new(<&mut ByteArray<256>>::try_from(biomes).unwrap()).unwrap(),
+        }
+    }
+}
+
+impl ChunkSection47 {
+    util::getter!(blocks, blocks_mut, BlockArray47<4096>);
+    util::getter!(light, light_mut, HalfByteArray<2048>);
+    util::opt_getter!(skylight, skylight_mut, HalfByteArray<2048>);
+    //util::getter!(biomes, biomes_mut, ByteArray<256>);
+}
+
+/*
+/// A chunk column, not including heightmaps
+pub struct ChunkColumn<const N: usize, S> {
+    pub sections: [Option<S>; N],
+}
+*/
+
 /// A 16 * 16 * 16 section of a chunk.
+/*
 pub struct ChunkSection<S, B> {
     pub block_count: u16,
     pub states: S,
@@ -686,7 +812,7 @@ impl<S: for<'a> Decode<'a>, B: for<'a> Decode<'a>> Decode<'_> for ChunkSection<S
         })
     }
 }
-
+*/
 #[cfg(test)]
 mod tests {
     use super::util::bit_at;
@@ -752,7 +878,10 @@ mod tests {
     mod pv49 {
         use std::io::Cursor;
 
-        use miners::{encoding::{Decode, Encode}, nbt};
+        use miners::{
+            encoding::{Decode, Encode},
+            nbt,
+        };
 
         use crate::chunk::ChunkColumn47;
 
@@ -761,9 +890,9 @@ mod tests {
             let data = include_bytes!("../test_data/testchunk.nbt");
             let nbt = nbt::Nbt::decode(&mut Cursor::new(data)).unwrap();
             let chunk = ChunkColumn47::from_nbt(&nbt, true).unwrap();
-            let clone = chunk.clone();
+            //let clone = chunk.clone();
             let mut buf = Vec::new();
-            clone.encode(&mut buf).unwrap();
+            chunk.encode(&mut buf).unwrap();
             panic!()
         }
     }

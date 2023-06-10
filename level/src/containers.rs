@@ -6,10 +6,10 @@ pub mod bitpack;
 pub mod palette;
 
 #[derive(Clone, Copy, Debug, Default)]
-#[repr(transparent)]
-pub struct Block49(u16);
+#[repr(packed)]
+pub struct Block47(u16);
 
-impl Block49 {
+impl Block47 {
     pub fn new(id: u16, metadata: u8) -> Self {
         Self((id << 4) | metadata as u16)
     }
@@ -30,27 +30,27 @@ impl Block49 {
 
 #[repr(transparent)]
 #[derive(Clone, Copy)]
-pub struct BlockArray49<const N: usize>([Block49; N]);
+pub struct BlockArray47<const N: usize>([Block47; N]);
 
-impl<const N: usize> AsRef<[Block49]> for BlockArray49<N> {
-    fn as_ref(&self) -> &[Block49] {
+impl<const N: usize> AsRef<[Block47]> for BlockArray47<N> {
+    fn as_ref(&self) -> &[Block47] {
         self.0.as_slice()
     }
 }
 
-impl<const N: usize> AsRef<[u8]> for BlockArray49<N> {
+impl<const N: usize> AsRef<[u8]> for BlockArray47<N> {
     fn as_ref(&self) -> &[u8] {
         // SAFETY: This is safe because BlockArray49 is an array of u16's which means the size in bytes is N * 2.
-        unsafe { std::slice::from_raw_parts(self as *const BlockArray49<N> as *const u8, N * 2) }
+        unsafe { std::slice::from_raw_parts(self as *const BlockArray47<N> as *const u8, N * 2) }
     }
 }
 
-impl<'a, const N: usize> TryFrom<&'a [u8]> for &'a BlockArray49<N> {
+impl<'a, const N: usize> TryFrom<&'a [u8]> for &'a BlockArray47<N> {
     type Error = std::io::Error;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
         if value.len() == N * 2 {
-            Ok(unsafe { std::mem::transmute(value.as_ptr()) })
+            Ok(unsafe { std::mem::transmute::<*const u8, &'a BlockArray47<N>>(value.as_ptr()) })
         } else {
             Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -60,20 +60,35 @@ impl<'a, const N: usize> TryFrom<&'a [u8]> for &'a BlockArray49<N> {
     }
 }
 
-impl<'a, const N: usize> From<&'a mut BlockArray49<N>> for &'a mut [u8; N] {
-    fn from(value: &'a mut BlockArray49<N>) -> Self {
+impl<'a, const N: usize> TryFrom<&'a mut [u8]> for &'a mut BlockArray47<N> {
+    type Error = std::io::Error;
+
+    fn try_from(value: &mut [u8]) -> Result<Self, Self::Error> {
+        if value.len() == N * 2 {
+            Ok(unsafe { std::mem::transmute::<*mut u8, &'a mut BlockArray47<N>>(value.as_mut_ptr()) })
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid len",
+            ))
+        }
+    }
+}
+
+impl<'a, const N: usize> From<&'a mut BlockArray47<N>> for &'a mut [u8; N] {
+    fn from(value: &'a mut BlockArray47<N>) -> Self {
         // SAFETY: This is fine because ByteArray is repr(transparent)
         unsafe { transmute(value) }
     }
 }
 
-impl<const N: usize> Encode for BlockArray49<N> {
+impl<const N: usize> Encode for BlockArray47<N> {
     fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
         writer.write_all(self.as_ref()).map_err(From::from)
     }
 }
 
-impl<'dec, const N: usize> Decode<'dec> for &BlockArray49<N> {
+impl<'dec, const N: usize> Decode<'dec> for &BlockArray47<N> {
     fn decode(cursor: &mut std::io::Cursor<&'dec [u8]>) -> miners::encoding::decode::Result<Self> {
         let slice = decode_slice::<N>(cursor)?;
         // SAFETY: This is safe because we created the ptr from a slice that we know has a len of RLEN
@@ -84,16 +99,16 @@ impl<'dec, const N: usize> Decode<'dec> for &BlockArray49<N> {
 }
 
 // SAFETY: This is fine because we uphold all of the invariants
-unsafe impl<const N: usize> ReadContainer<Block49> for BlockArray49<N> {
+unsafe impl<const N: usize> ReadContainer<Block47> for BlockArray47<N> {
     const N: usize = N;
-    unsafe fn get_unchecked(&self, i: usize) -> Block49 {
+    unsafe fn get_unchecked(&self, i: usize) -> Block47 {
         *self.0.get_unchecked(i)
     }
 }
 
 // SAFETY: This is fine because we uphold all of the invariants
-unsafe impl<const N: usize> WriteContainer<Block49> for BlockArray49<N> {
-    unsafe fn set_unchecked(&mut self, i: usize, v: Block49) {
+unsafe impl<const N: usize> WriteContainer<Block47> for BlockArray47<N> {
+    unsafe fn set_unchecked(&mut self, i: usize, v: Block47) {
         *self.0.get_unchecked_mut(i) = v
     }
 }
@@ -101,6 +116,36 @@ unsafe impl<const N: usize> WriteContainer<Block49> for BlockArray49<N> {
 #[derive(Clone, Copy, Debug)]
 #[repr(transparent)]
 pub struct ByteArray<const N: usize>([u8; N]);
+
+impl<'a, const N: usize> TryFrom<&'a mut [u8]> for &'a mut ByteArray<N> {
+    type Error = std::io::Error;
+
+    fn try_from(value: &mut [u8]) -> Result<Self, Self::Error> {
+        if value.len() == N {
+            Ok(unsafe { std::mem::transmute::<*mut u8, &'a mut ByteArray<N>>(value.as_mut_ptr()) })
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid len",
+            ))
+        }
+    }
+}
+
+impl<'a, const N: usize> TryFrom<&'a [u8]> for &'a ByteArray<N> {
+    type Error = std::io::Error;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        if value.len() == N {
+            Ok(unsafe { std::mem::transmute::<*const u8, &'a ByteArray<N>>(value.as_ptr()) })
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid len",
+            ))
+        }
+    }
+}
 
 impl<const N: usize> AsRef<[u8]> for ByteArray<N> {
     fn as_ref(&self) -> &[u8] {
@@ -216,6 +261,36 @@ impl<'a, const RLEN: usize> From<&'a mut HalfByteArray<RLEN>> for &'a mut [u8; R
     fn from(value: &'a mut HalfByteArray<RLEN>) -> Self {
         // SAFETY: This is fine because ByteArray is repr(transparent)
         unsafe { std::mem::transmute(value) }
+    }
+}
+
+impl<'a, const RLEN: usize> TryFrom<&'a mut [u8]> for &'a mut HalfByteArray<RLEN> {
+    type Error = std::io::Error;
+
+    fn try_from(value: &'a mut [u8]) -> Result<Self, Self::Error> {
+        if value.len() == RLEN {
+            Ok(unsafe { std::mem::transmute::<*mut u8, &'a mut HalfByteArray<RLEN>>(value.as_mut_ptr()) })
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid len",
+            ))
+        }
+    }
+}
+
+impl<'a, const N: usize> TryFrom<&'a [u8]> for &'a HalfByteArray<N> {
+    type Error = std::io::Error;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        if value.len() == N {
+            Ok(unsafe { std::mem::transmute::<*const u8, &'a HalfByteArray<N>>(value.as_ptr()) })
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid len",
+            ))
+        }
     }
 }
 

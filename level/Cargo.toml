@@ -9,3 +9,4 @@ edition = "2021"
 thiserror = "1.0.37"
 miners = { git = "https://github.com/mine-rs/mine-rs" }
 flate2 = "1.0.25"
+bumpalo = "3.13.0"
