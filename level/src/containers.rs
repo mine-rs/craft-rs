@@ -60,7 +60,9 @@ impl<'a, const N: usize> TryFrom<&'a mut [u8]> for &'a mut BlockArray47<N> {
 
     fn try_from(value: &mut [u8]) -> Result<Self, Self::Error> {
         if value.len() == N * 2 {
-            Ok(unsafe { std::mem::transmute::<*mut u8, &'a mut BlockArray47<N>>(value.as_mut_ptr()) })
+            Ok(unsafe {
+                std::mem::transmute::<*mut u8, &'a mut BlockArray47<N>>(value.as_mut_ptr())
+            })
         } else {
             Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -264,7 +266,9 @@ impl<'a, const RLEN: usize> TryFrom<&'a mut [u8]> for &'a mut HalfByteArray<RLEN
 
     fn try_from(value: &'a mut [u8]) -> Result<Self, Self::Error> {
         if value.len() == RLEN {
-            Ok(unsafe { std::mem::transmute::<*mut u8, &'a mut HalfByteArray<RLEN>>(value.as_mut_ptr()) })
+            Ok(unsafe {
+                std::mem::transmute::<*mut u8, &'a mut HalfByteArray<RLEN>>(value.as_mut_ptr())
+            })
         } else {
             Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
