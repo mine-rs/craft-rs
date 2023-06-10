@@ -65,7 +65,7 @@ mod util {
     macro_rules! void {
         ($_:tt, $e:expr) => {
             $e
-        }
+        };
     }
 
     /// Used to implement clone for the 0 and 47 protocol versions
@@ -92,7 +92,7 @@ mod util {
                             $(util::void!($marker, section.add().map(|v| buf.alloc_slice_copy(v.as_ref()))),)?
                         ))
                     }
-            
+
                     let biomes = NonNull::new(
                         <&mut ByteArray<256>>::try_from(
                             buf.alloc_slice_copy(unsafe { self.biomes.as_ref() }.as_ref()),
@@ -100,7 +100,7 @@ mod util {
                         .unwrap(),
                     )
                     .unwrap();
-            
+
                     Self {
                         buf,
                         size: self.size,
@@ -210,9 +210,7 @@ impl Encode for ChunkColumn0 {
 impl ChunkColumn0 {
     util::from_reader_fn!(
         ChunkSection0,
-        |buf, data, skylight| {
-            ChunkSection0::new(&buf, &mut data, skylight, add)
-        },
+        |buf, data, skylight| { ChunkSection0::new(&buf, &mut data, skylight, add) },
         add,
         u16
     );
@@ -476,7 +474,9 @@ impl ChunkColumn47 {
 }
 
 impl ChunkColumn47 {
-    util::from_reader_fn!(ChunkSection47, |buf, data, skylight| ChunkSection47::new(&buf, &mut data, skylight));
+    util::from_reader_fn!(ChunkSection47, |buf, data, skylight| ChunkSection47::new(
+        &buf, &mut data, skylight
+    ));
 
     /// Parses 1.8 anvil chunk nbt data into a `ChunkColumn49`. This function does not take an entire region file as input, but one of the chunks contained within.
     pub fn from_nbt(nbt: &miners::nbt::Compound, skylight: bool) -> Option<Self> {
@@ -517,8 +517,11 @@ impl ChunkColumn47 {
             let metadata: &[u8; 2048] = metadata[..2048].try_into().unwrap();
             let metadata = <&HalfByteArray<2048>>::from(metadata);
 
-            let slice = buf.alloc_slice_fill_with(4096, |i| Block47::new(blocks[i] as u16, metadata.get(i)));
-            let blocks: &mut [u8] = unsafe { std::slice::from_raw_parts_mut(slice.as_mut_ptr().cast::<u8>(), slice.len() * 2) };
+            let slice = buf
+                .alloc_slice_fill_with(4096, |i| Block47::new(blocks[i] as u16, metadata.get(i)));
+            let blocks: &mut [u8] = unsafe {
+                std::slice::from_raw_parts_mut(slice.as_mut_ptr().cast::<u8>(), slice.len() * 2)
+            };
 
             let skylight = if skylight {
                 let skylight = section.get("SkyLight")?.as_byte_array()?;
@@ -576,19 +579,16 @@ pub struct ChunkSection47 {
     blocks: NonNull<BlockArray47<4096>>,
     light: NonNull<HalfByteArray<2048>>,
     skylight: Option<NonNull<HalfByteArray<2048>>>,
-    //biomes: NonNull<ByteArray<256>>,
 }
 
 impl Encode for ChunkSection47 {
     fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
-        unsafe {
-            writer.write_all(self.blocks.as_ref().as_ref())?;
-            writer.write_all(self.light.as_ref().as_ref())?;
-            if let Some(skylight) = &self.skylight {
-                writer.write_all(skylight.as_ref().as_ref())?;
-            }
-            Ok(())
+        writer.write_all(self.blocks().as_ref())?;
+        writer.write_all(self.light().as_ref())?;
+        if let Some(skylight) = self.skylight() {
+            writer.write_all(skylight.as_ref())?;
         }
+        Ok(())
     }
 }
 
@@ -657,6 +657,7 @@ impl ChunkSection47 {
     //util::getter!(biomes, biomes_mut, ByteArray<256>);
 }
 
+/*
 pub struct ChunkSection<S, B> {
     pub block_count: u16,
     pub states: S,
@@ -679,7 +680,7 @@ impl<S: for<'a> Decode<'a>, B: for<'a> Decode<'a>> Decode<'_> for ChunkSection<S
             biomes: B::decode(cursor)?,
         })
     }
-}
+}*/
 
 #[cfg(test)]
 mod tests {
@@ -699,7 +700,7 @@ mod tests {
         }
     }
 
-/*
+    /*
     mod pv0 {
         use super::super::{util::bit_at, ChunkColumn0};
 
