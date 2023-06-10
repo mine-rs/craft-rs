@@ -494,6 +494,7 @@ impl ChunkColumn47 {
             None, None, None, None, None, None, None, None, None, None, None, None, None, None,
             None, None,
         ];
+
         let size: usize = Self::section_size(skylight) * sections_data.len();
         let buf = Bump::with_capacity(size);
 
@@ -505,10 +506,9 @@ impl ChunkColumn47 {
             let light = buf.alloc_slice_copy(light.as_ref());
 
             let blocks = section.get("Blocks")?.as_byte_array()?;
-            if blocks.len() != 8192 {
+            if blocks.len() != 4096 {
                 return None;
             }
-            let blocks = buf.alloc_slice_copy(blocks.as_ref());
 
             let metadata = section.get("Data")?.as_byte_array()?;
             if metadata.len() != 2048 {
@@ -517,7 +517,8 @@ impl ChunkColumn47 {
             let metadata: &[u8; 2048] = metadata[..2048].try_into().unwrap();
             let metadata = <&HalfByteArray<2048>>::from(metadata);
 
-            buf.alloc_slice_fill_with(4096, |i| Block47::new(blocks[i] as u16, metadata.get(i)));
+            let slice = buf.alloc_slice_fill_with(4096, |i| Block47::new(blocks[i] as u16, metadata.get(i)));
+            let blocks: &mut [u8] = unsafe { std::slice::from_raw_parts_mut(slice.as_mut_ptr().cast::<u8>(), slice.len() * 2) };
 
             let skylight = if skylight {
                 let skylight = section.get("SkyLight")?.as_byte_array()?;
