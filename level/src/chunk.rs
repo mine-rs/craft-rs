@@ -196,10 +196,26 @@ unsafe impl Send for ChunkColumn0 {}
 impl Encode for ChunkColumn0 {
     // This implementation only writes the chunk data, not the metadata.
     fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
+        // TODO: add a way for the user to specify the compression level.
         let mut compression = flate2::write::ZlibEncoder::new(writer, flate2::Compression::fast());
         for section in self.sections.iter().flatten() {
-            // TODO: add a way for the user to specify the compression level.
-            section.encode(&mut compression)?;
+            section.blocks().as_ref().encode(&mut compression)?
+        }
+        for section in self.sections.iter().flatten() {
+            section.metadata().as_ref().encode(&mut compression)?
+        }
+        for section in self.sections.iter().flatten() {
+            section.light().as_ref().encode(&mut compression)?
+        }
+        for section in self.sections.iter().flatten() {
+            if let Some(skylight) = section.skylight() {
+                skylight.as_ref().encode(&mut compression)?
+            }
+        }
+        for section in self.sections.iter().flatten() {
+            if let Some(add) = section.add() {
+                add.as_ref().encode(&mut compression)?
+            }
         }
         unsafe { self.biomes.as_ref().encode(&mut compression)? };
         compression.flush_finish()?;
@@ -389,24 +405,6 @@ impl ChunkSection0 {
     }
 }
 
-impl Encode for ChunkSection0 {
-    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
-        // Safety: This is safe because the points are all valid references for the lifetime of self.
-        unsafe {
-            writer.write_all(self.blocks.as_ref().as_ref())?;
-            writer.write_all(self.metadata.as_ref().as_ref())?;
-            writer.write_all(self.light.as_ref().as_ref())?;
-            if let Some(skylight) = &self.skylight {
-                writer.write_all(skylight.as_ref().as_ref())?;
-            }
-            if let Some(add) = &self.add {
-                writer.write_all(add.as_ref().as_ref())?;
-            }
-            Ok(())
-        }
-    }
-}
-
 impl ChunkSection0 {
     util::getter!(blocks, blocks_mut, ByteArray<4096>);
     util::getter!(metadata, metadata_mut, HalfByteArray<2048>);
@@ -587,17 +585,6 @@ pub struct ChunkSection47 {
     blocks: NonNull<BlockArray47<4096>>,
     light: NonNull<HalfByteArray<2048>>,
     skylight: Option<NonNull<HalfByteArray<2048>>>,
-}
-
-impl Encode for ChunkSection47 {
-    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
-        writer.write_all(self.blocks().as_ref())?;
-        writer.write_all(self.light().as_ref())?;
-        if let Some(skylight) = self.skylight() {
-            writer.write_all(skylight.as_ref())?;
-        }
-        Ok(())
-    }
 }
 
 impl ChunkSection47 {
