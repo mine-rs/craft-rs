@@ -433,9 +433,17 @@ unsafe impl Send for ChunkColumn47 {}
 impl Encode for ChunkColumn47 {
     fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
         for section in self.sections.iter().flatten() {
-            section.encode(writer)?;
-            unsafe { self.biomes.as_ref().encode(writer)? };
+            section.blocks().encode(writer)?
         }
+        for section in self.sections.iter().flatten() {
+            section.light().encode(writer)?
+        }
+        for section in self.sections.iter().flatten() {
+            if let Some(skylight) = section.skylight() {
+                skylight.encode(writer)?
+            }
+        }
+        unsafe { self.biomes.as_ref().encode(writer)? };
         Ok(())
     }
 }
