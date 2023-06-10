@@ -15,13 +15,13 @@ mod util {
     macro_rules! create {
         ($t:ty, $buf:ident, $data:ident) => {{
             let slice = $buf.alloc_slice_copy(&$data[..std::mem::size_of::<$t>()]);
-            *$data = &$data[std::mem::size_of::<$t>()..];
+            $data = &$data[std::mem::size_of::<$t>()..];
             NonNull::new(<&mut $t>::try_from(slice).unwrap()).unwrap()
         }};
     }
 
     #[inline]
-    pub const fn bit_at(val: u16, idx: u8) -> bool {
+    pub const fn bit_at(val: u16, idx: usize) -> bool {
         debug_assert!((idx <= 0x0f));
         (val >> idx) & 0b1 != 0
     }
@@ -113,6 +113,7 @@ mod util {
         };
     }
 
+    /*
     macro_rules! from_reader_fn {
         ($section:ty, | $buf:ident, $data:ident, $skylight:ident | $e:expr $(, $add:ident, $t:ty)?) => {
             pub fn from_reader(
@@ -168,10 +169,10 @@ mod util {
                 })
             }
         };
-    }
+    }*/
 
     pub(super) use create;
-    pub(super) use from_reader_fn;
+    //pub(super) use from_reader_fn;
     pub(super) use getter;
     pub(super) use impl_clone;
     pub(super) use opt_getter;
@@ -224,12 +225,12 @@ impl Encode for ChunkColumn0 {
 }
 
 impl ChunkColumn0 {
-    util::from_reader_fn!(
-        ChunkSection0,
-        |buf, data, skylight| { ChunkSection0::new(&buf, &mut data, skylight, add) },
-        add,
-        u16
-    );
+    //util::from_reader_fn!(
+    //    ChunkSection0,
+    //    |buf, data, skylight| { ChunkSection0::new(&buf, &mut data, skylight, add) },
+    //    add,
+    //    u16
+    //);
 
     /// Creates a new section and zero-initialises all of the buffers
     pub fn insert_section(&mut self, section: usize, add: bool) {
@@ -334,23 +335,23 @@ pub struct ChunkSection0 {
 }
 
 impl ChunkSection0 {
-    fn new(buf: &Bump, data: &mut &[u8], skylight: bool, add: bool) -> Self {
-        Self {
-            blocks: create!(ByteArray<4096>, buf, data),
-            metadata: create!(HalfByteArray<2048>, buf, data),
-            light: create!(HalfByteArray<2048>, buf, data),
-            skylight: if skylight {
-                Some(create!(HalfByteArray<2048>, buf, data))
-            } else {
-                None
-            },
-            add: if add {
-                Some(create!(HalfByteArray<2048>, buf, data))
-            } else {
-                None
-            },
-        }
-    }
+    //fn new(buf: &Bump, data: &mut &[u8], skylight: bool, add: bool) -> Self {
+    //    Self {
+    //        blocks: create!(ByteArray<4096>, buf, data),
+    //        metadata: create!(HalfByteArray<2048>, buf, data),
+    //        light: create!(HalfByteArray<2048>, buf, data),
+    //        skylight: if skylight {
+    //            Some(create!(HalfByteArray<2048>, buf, data))
+    //        } else {
+    //            None
+    //        },
+    //        add: if add {
+    //            Some(create!(HalfByteArray<2048>, buf, data))
+    //        } else {
+    //            None
+    //        },
+    //    }
+    //}
 
     fn from_slices(
         blocks: &mut [u8],
@@ -480,9 +481,93 @@ impl ChunkColumn47 {
 }
 
 impl ChunkColumn47 {
-    util::from_reader_fn!(ChunkSection47, |buf, data, skylight| ChunkSection47::new(
-        &buf, &mut data, skylight
-    ));
+    pub fn from_reader(
+        cursor: &mut std::io::Cursor<&[u8]>,
+        skylight: bool,
+        bitmask: u16,
+    ) -> miners::encoding::decode::Result<Self> {
+        let mut size = 256;
+        let mut exists = [false; 16];
+        for i in 0..16 {
+            exists[i] = util::bit_at(bitmask, i);
+            size += Self::section_size(skylight)
+        }
+
+        let mut data = {
+            let pos = cursor.position() as usize;
+            let slice = cursor
+                .get_ref()
+                .get(pos..pos + size as usize)
+                .ok_or(miners::encoding::decode::Error::UnexpectedEndOfSlice)?;
+            cursor.set_position((pos + size) as u64);
+            debug_assert_eq!(slice.len(), size);
+            slice
+        };
+
+        let buf = Bump::with_capacity(size);
+
+        let mut sections: [Option<ChunkSection47>; 16] = [
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None,
+        ];
+
+        let mut blocks: [Option<NonNull<BlockArray47<4096>>>; 16] = [
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None,
+        ];
+
+        for (i, exists) in exists.iter().enumerate() {
+            if *exists {
+                blocks[i] = Some(util::create!(BlockArray47<4096>, buf, data))
+            }
+        }
+
+        let mut light: [Option<NonNull<HalfByteArray<2048>>>; 16] = [
+            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+            None, None,
+        ];
+
+        for (i, exists) in exists.iter().enumerate() {
+            if *exists {
+                light[i] = Some(create!(HalfByteArray<2048>, buf, data))
+            }
+        }
+
+        if skylight {
+            for (i, exists) in exists.iter().enumerate() {
+                if *exists {
+                    sections[i] = Some(ChunkSection47 {
+                        blocks: blocks[i].unwrap(),
+                        light: light[i].unwrap(),
+                        skylight: Some(create!(HalfByteArray<2048>, buf, data)),
+                    })
+                }
+            }
+        } else {
+            for (i, exists) in exists.iter().enumerate() {
+                if *exists {
+                    sections[i] = Some(ChunkSection47 {
+                        blocks: blocks[i].unwrap(),
+                        light: light[i].unwrap(),
+                        skylight: None,
+                    })
+                }
+            }
+        }
+
+        let biomes: NonNull<ByteArray<256>> = create!(ByteArray<256>, buf, data);
+        Ok(Self {
+            buf,
+            size,
+            skylight,
+            sections,
+            biomes,
+        })
+    }
+
+    //util::from_reader_fn!(ChunkSection47, |buf, data, skylight| ChunkSection47::new(
+    //    &buf, &mut data, skylight
+    //));
 
     /// Parses 1.8 anvil chunk nbt data into a `ChunkColumn49`. This function does not take an entire region file as input, but one of the chunks contained within.
     pub fn from_nbt(nbt: &miners::nbt::Compound, skylight: bool) -> Option<Self> {
@@ -569,7 +654,6 @@ impl ChunkColumn47 {
             } else {
                 0
             }
-            + size_of::<ByteArray<256>>()
     }
 
     pub fn insert_section(&mut self, i: usize, skylight: bool) {
@@ -588,17 +672,17 @@ pub struct ChunkSection47 {
 }
 
 impl ChunkSection47 {
-    pub(self) fn new(buf: &bumpalo::Bump, data: &mut &[u8], skylight: bool) -> Self {
-        ChunkSection47 {
-            blocks: create!(BlockArray47<4096>, buf, data),
-            light: create!(HalfByteArray<2048>, buf, data),
-            skylight: if skylight {
-                Some(create!(HalfByteArray<2048>, buf, data))
-            } else {
-                None
-            },
-        }
-    }
+    //pub(self) fn new(buf: &bumpalo::Bump, data: &mut &[u8], skylight: bool) -> Self {
+    //    ChunkSection47 {
+    //        blocks: create!(BlockArray47<4096>, buf, data),
+    //        light: create!(HalfByteArray<2048>, buf, data),
+    //        skylight: if skylight {
+    //            Some(create!(HalfByteArray<2048>, buf, data))
+    //        } else {
+    //            None
+    //        },
+    //    }
+    //}
 
     pub(self) fn new_zeroed(buf: &Bump, skylight: bool) -> Self {
         ChunkSection47 {
@@ -655,7 +739,7 @@ mod tests {
     #[test]
     fn _bit_at() {
         let bitmask = 0b1010101010101010u16;
-        for i in 0u8..16 {
+        for i in 0..16 {
             let bit = bit_at(bitmask, i);
             if i % 2 == 0 && bit {
                 panic!("{i}th bit should be 0!")
