@@ -602,7 +602,6 @@ impl ChunkSection47 {
             } else {
                 None
             },
-            //biomes: create!(ByteArray<256>, buf, data),
         }
     }
 
@@ -631,7 +630,6 @@ impl ChunkSection47 {
             } else {
                 None
             },
-            //biomes: NonNull::new(<&mut ByteArray<256>>::try_from(buf.alloc_slice_fill_with(4096, |_| 0)).unwrap()).unwrap(),
         }
     }
 
@@ -645,7 +643,6 @@ impl ChunkSection47 {
             light: NonNull::new(<&mut HalfByteArray<2048>>::try_from(light).unwrap()).unwrap(),
             skylight: skylight
                 .map(|v| NonNull::new(<&mut HalfByteArray<2048>>::try_from(v).unwrap()).unwrap()),
-            //biomes: NonNull::new(<&mut ByteArray<256>>::try_from(biomes).unwrap()).unwrap(),
         }
     }
 }
@@ -654,7 +651,6 @@ impl ChunkSection47 {
     util::getter!(blocks, blocks_mut, BlockArray47<4096>);
     util::getter!(light, light_mut, HalfByteArray<2048>);
     util::opt_getter!(skylight, skylight_mut, HalfByteArray<2048>);
-    //util::getter!(biomes, biomes_mut, ByteArray<256>);
 }
 
 #[cfg(test)]
