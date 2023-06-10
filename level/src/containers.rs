@@ -21,11 +21,6 @@ impl Block47 {
     pub fn metadata(self) -> u16 {
         self.0 & 0x000f
     }
-
-    pub(crate) fn as_slice(&self) -> &[u8] {
-        // Safety: this is safe because `Block49` has the same layout as [u8; 2]
-        unsafe { std::slice::from_raw_parts(std::mem::transmute(self), 2) }
-    }
 }
 
 #[repr(transparent)]
