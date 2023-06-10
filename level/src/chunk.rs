@@ -142,7 +142,6 @@ mod util {
                 };
 
                 let $buf = Bump::with_capacity(size);
-                // Copy the data over to the buffer
 
                 let mut sections: [Option<$section>; 16] = [
                     None, None, None, None, None, None, None, None, None, None, None, None, None, None,
@@ -153,7 +152,6 @@ mod util {
                     let exists: bool = $crate::chunk::util::bit_at(bitmask, i);
                     if exists {
                         $(let $add: bool = util::bit_at($add, i);)?
-                        // Safety: This is safe because p is properly allocated and there are no other references pointing to it.
                         let section = $e;
                         sections[i as usize] = Some(section)
                     }
@@ -162,12 +160,10 @@ mod util {
                 let biomes = NonNull::new(<&mut ByteArray<256>>::try_from($buf.alloc_slice_copy($data)).unwrap()).unwrap();
 
                 Ok(Self {
-                    // Safety: This is safe because buf isn't a null pointer.
                     $buf,
                     size,
                     $skylight,
-                    // Safety: The compiler thinks `sections` is bound by the lifetime of the cursor slice, but it isn't because we copied the data over to a new buffer.
-                    sections: unsafe { std::mem::transmute(sections) },
+                    sections,
                     biomes,
                 })
             }
@@ -192,60 +188,10 @@ pub struct ChunkColumn0 {
 
 impl_clone!(ChunkColumn0, ChunkSection0, ());
 
-/*
-impl Clone for ChunkColumn0 {
-    fn clone(&self) -> Self {
-        let buf = Bump::with_capacity(self.size);
-        let mut sections: [Option<ChunkSection0>; 16] = [
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None,
-        ];
-        for (i, section) in self
-            .sections
-            .iter()
-            .enumerate()
-            .flat_map(|(i, section)| section.into_iter().map(move |x| (i, x)))
-        {
-            sections[i] = Some(ChunkSection0::from_slices(
-                buf.alloc_slice_copy(section.blocks().as_ref()),
-                buf.alloc_slice_copy(section.metadata().as_ref()),
-                buf.alloc_slice_copy(section.light().as_ref()),
-                section.skylight().map(|v| buf.alloc_slice_copy(v.as_ref())),
-                section.add().map(|v| buf.alloc_slice_copy(v.as_ref())),
-            ))
-        }
-
-        let biomes = NonNull::new(
-            <&mut ByteArray<256>>::try_from(
-                buf.alloc_slice_copy(unsafe { self.biomes.as_ref() }.as_ref()),
-            )
-            .unwrap(),
-        )
-        .unwrap();
-
-        Self {
-            buf,
-            size: self.size,
-            skylight: self.skylight,
-            sections,
-            biomes,
-        }
-    }
-}
-*/
-
 // Safety: This is safe because no data races can occur since the mutable pointers are only written to when &mut self is passed.
 unsafe impl Sync for ChunkColumn0 {}
 // Safety: ^
 unsafe impl Send for ChunkColumn0 {}
-
-/*
-impl Default for ChunkColumn0 {
-    fn default() -> Self {
-        Self::new(true)
-    }
-}
-*/
 
 impl Encode for ChunkColumn0 {
     // This implementation only writes the chunk data, not the metadata.
@@ -262,21 +208,6 @@ impl Encode for ChunkColumn0 {
 }
 
 impl ChunkColumn0 {
-    /*
-    /// Constructs a new `ChunkColumn0`, doesn't allocate.
-    pub fn new(skylight: bool) -> Self {
-        Self {
-            buf: Bump::new(),
-            size: 0,
-            skylight,
-            sections: [
-                None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-                None, None,
-            ],
-            biomes: todo!()
-        }
-    }*/
-
     util::from_reader_fn!(
         ChunkSection0,
         |buf, data, skylight| {
@@ -356,7 +287,6 @@ impl ChunkColumn0 {
                 0
             }
             + size_of::<ByteArray<256>>()
-        //4096 + (2 * 2048) + 256 + if skylight { 2048 } else { 0 } + if add { 2048 } else { 0 }
     }
 }
 
@@ -547,58 +477,7 @@ impl ChunkColumn47 {
 
 impl ChunkColumn47 {
     util::from_reader_fn!(ChunkSection47, |buf, data, skylight| ChunkSection47::new(&buf, &mut data, skylight));
-/*
-    pub fn from_reader(
-        cursor: &mut std::io::Cursor<&[u8]>,
-        skylight: bool,
-        bitmask: u16,
-    ) -> miners::encoding::decode::Result<Self> {
-        let mut size = 0;
-        for i in 0u8..16 {
-            let exists: bool = util::bit_at(bitmask, i);
-            if exists {
-                size += Self::section_size(skylight)
-            }
-        }
 
-        let mut data = {
-            let pos = cursor.position() as usize;
-            let slice = cursor
-                .get_ref()
-                .get(pos..pos + size as usize)
-                .ok_or(miners::encoding::decode::Error::UnexpectedEndOfSlice)?;
-            cursor.set_position((pos + size) as u64);
-            debug_assert_eq!(slice.len(), size);
-            slice
-        };
-
-        let buf = Bump::new();
-
-        let mut sections: [Option<ChunkSection47>; 16] = [
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None,
-        ];
-
-        for i in 0..16 {
-            let exists = util::bit_at(bitmask, i as u8);
-            if exists {
-                sections[i as usize] = Some(ChunkSection47::new(&buf, &mut data, skylight))
-            }
-        }
-
-        let biomes =
-            NonNull::new(<&mut ByteArray<256>>::try_from(buf.alloc_slice_copy(data)).unwrap())
-                .unwrap();
-
-        Ok(Self {
-            buf,
-            size,
-            skylight,
-            sections,
-            biomes,
-        })
-    }
-*/
     /// Parses 1.8 anvil chunk nbt data into a `ChunkColumn49`. This function does not take an entire region file as input, but one of the chunks contained within.
     pub fn from_nbt(nbt: &miners::nbt::Compound, skylight: bool) -> Option<Self> {
         //TODO: Return Result and not Option.
@@ -635,7 +514,6 @@ impl ChunkColumn47 {
             if metadata.len() != 2048 {
                 return None;
             }
-            //let metadata = <&HalfByteArray<2048>>::from(std::mem::transmute::<*const u8, &[u8; 2048]>(metadata.as_ptr()));
             let metadata: &[u8; 2048] = metadata[..2048].try_into().unwrap();
             let metadata = <&HalfByteArray<2048>>::from(metadata);
 
@@ -666,7 +544,6 @@ impl ChunkColumn47 {
         Some(Self {
             size,
             sections,
-            // Safety: This is safe because buf isn't a null pointer.
             buf,
             skylight,
             biomes,
@@ -709,7 +586,6 @@ impl Encode for ChunkSection47 {
             if let Some(skylight) = &self.skylight {
                 writer.write_all(skylight.as_ref().as_ref())?;
             }
-            //writer.write_all(self.biomes.as_ref().as_ref())?;
             Ok(())
         }
     }
@@ -780,15 +656,6 @@ impl ChunkSection47 {
     //util::getter!(biomes, biomes_mut, ByteArray<256>);
 }
 
-/*
-/// A chunk column, not including heightmaps
-pub struct ChunkColumn<const N: usize, S> {
-    pub sections: [Option<S>; N],
-}
-*/
-
-/// A 16 * 16 * 16 section of a chunk.
-/*
 pub struct ChunkSection<S, B> {
     pub block_count: u16,
     pub states: S,
@@ -812,7 +679,7 @@ impl<S: for<'a> Decode<'a>, B: for<'a> Decode<'a>> Decode<'_> for ChunkSection<S
         })
     }
 }
-*/
+
 #[cfg(test)]
 mod tests {
     use super::util::bit_at;
@@ -831,8 +698,10 @@ mod tests {
         }
     }
 
+/*
     mod pv0 {
         use super::super::{util::bit_at, ChunkColumn0};
+
         #[test]
         fn _from_reader() {
             // first we generate the data
@@ -873,7 +742,9 @@ mod tests {
             drop(data);
             chunk.insert_section(6, false);
         }
-    }
+
+
+    }*/
 
     mod pv49 {
         use std::io::Cursor;
