@@ -657,31 +657,6 @@ impl ChunkSection47 {
     //util::getter!(biomes, biomes_mut, ByteArray<256>);
 }
 
-/*
-pub struct ChunkSection<S, B> {
-    pub block_count: u16,
-    pub states: S,
-    pub biomes: B,
-}
-
-impl<S: Encode, B: Encode> Encode for ChunkSection<S, B> {
-    fn encode(&self, writer: &mut impl std::io::Write) -> miners::encoding::encode::Result<()> {
-        self.block_count.encode(writer)?;
-        self.states.encode(writer)?;
-        self.biomes.encode(writer)
-    }
-}
-
-impl<S: for<'a> Decode<'a>, B: for<'a> Decode<'a>> Decode<'_> for ChunkSection<S, B> {
-    fn decode(cursor: &mut std::io::Cursor<&'_ [u8]>) -> miners::encoding::decode::Result<Self> {
-        Ok(Self {
-            block_count: u16::decode(cursor)?,
-            states: S::decode(cursor)?,
-            biomes: B::decode(cursor)?,
-        })
-    }
-}*/
-
 #[cfg(test)]
 mod tests {
     use super::util::bit_at;
