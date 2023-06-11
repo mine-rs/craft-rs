@@ -2,13 +2,11 @@ use std::ptr::NonNull;
 
 use bumpalo::Bump;
 use miners::{
-    encoding::{Decode, Encode},
+    encoding::Encode,
     nbt::List,
 };
 
 use crate::containers::{Block47, BlockArray47, ByteArray, HalfByteArray, ReadContainer};
-
-use self::util::{create, impl_clone};
 
 mod util {
     //TODO: rename
@@ -66,6 +64,13 @@ mod util {
         ($_:tt, $e:expr) => {
             $e
         };
+        ($_:tt) => {};
+    }
+
+    macro_rules! void_t {
+        ($_:tt, $t:ty) => {
+            $t
+        };
     }
 
     /// Used to implement clone for the 0 and 47 protocol versions
@@ -113,25 +118,26 @@ mod util {
         };
     }
 
-    /*
     macro_rules! from_reader_fn {
-        ($section:ty, | $buf:ident, $data:ident, $skylight:ident | $e:expr $(, $add:ident, $t:ty)?) => {
+        ($section_t:ty, $blocks_t:ty $(, $marker:tt)?) => {
             pub fn from_reader(
                 cursor: &mut std::io::Cursor<&[u8]>,
-                $skylight: bool,
+                skylight: bool,
                 bitmask: u16,
-                $($add: $t)?
+                $(add: util::void_t!($marker, u16))?
             ) -> miners::encoding::decode::Result<Self> {
-                let mut size = 0;
-                for i in 0u8..16  {
-                    let exists: bool = $crate::chunk::util::bit_at(bitmask, i);
-                    if exists {
-                        $(let $add: bool = util::bit_at($add, i);)?
-                        size += Self::section_size($skylight, $($add)?);
-                    }
+                let mut size = 256;
+                let mut exists = [false; 16];
+                $(let mut add_array = util::void!($marker, [false; 16]);)?
+                for i in 0..16 {
+                    exists[i] = util::bit_at(bitmask, i);
+                    $(let add = util::void!($marker, util::bit_at(add, i));
+                    add_array[i] = add;
+                    )?
+                    size += Self::section_size(skylight $(, util::void!($marker, add))?);
                 }
 
-                let mut $data = {
+                let mut data = {
                     let pos = cursor.position() as usize;
                     let slice = cursor
                         .get_ref()
@@ -142,41 +148,106 @@ mod util {
                     slice
                 };
 
-                let $buf = Bump::with_capacity(size);
+                let buf = Bump::with_capacity(size);
 
-                let mut sections: [Option<$section>; 16] = [
+                let mut sections: [Option<$section_t>; 16] = [
                     None, None, None, None, None, None, None, None, None, None, None, None, None, None,
                     None, None,
                 ];
 
-                for i in 0u8..16 {
-                    let exists: bool = $crate::chunk::util::bit_at(bitmask, i);
-                    if exists {
-                        $(let $add: bool = util::bit_at($add, i);)?
-                        let section = $e;
-                        sections[i as usize] = Some(section)
+                let mut blocks: [Option<NonNull<$blocks_t>>; 16] = [
+                    None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+                    None, None,
+                ];
+
+                for (i, exists) in exists.iter().enumerate() {
+                    if *exists {
+                        blocks[i] = Some(util::create!($blocks_t, buf, data))
                     }
                 }
 
-                let biomes = NonNull::new(<&mut ByteArray<256>>::try_from($buf.alloc_slice_copy($data)).unwrap()).unwrap();
+                $(let mut metadata: [Option<NonNull<HalfByteArray<2048>>>; 16] = util::void!($marker, [
+                    None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+                    None, None,
+                ]);
+
+                for (i, exists) in exists.iter().enumerate() {
+                    if *exists {
+                        metadata[i] = Some(util::create!(HalfByteArray<2048>, buf, data))
+                    }
+                }
+                )?
+
+                $(let mut add_data: [Option<NonNull<HalfByteArray<2048>>>; 16] = util::void!($marker, [
+                    None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+                    None, None,
+                ]);
+
+                for (i, add) in add_array.iter().enumerate() {
+                    if *add {
+                        add_data[i] = Some(util::create!(HalfByteArray<2048>, buf, data))
+                    }
+                }
+
+                )?
+
+                let mut light: [Option<NonNull<HalfByteArray<2048>>>; 16] = [
+                    None, None, None, None, None, None, None, None, None, None, None, None, None, None,
+                    None, None,
+                ];
+
+                for (i, exists) in exists.iter().enumerate() {
+                    if *exists {
+                        light[i] = Some(util::create!(HalfByteArray<2048>, buf, data))
+                    }
+                }
+
+                if skylight {
+                    for (i, exists) in exists.iter().enumerate() {
+                        if *exists {
+                            sections[i] = Some(<$section_t>::new(
+                                blocks[i].unwrap(),
+                                $(util::void!($marker, metadata[i].unwrap()),)?
+                                light[i].unwrap(),
+                                Some(util::create!(HalfByteArray<2048>, buf, data)),
+                                $(util::void!($marker, add_data[i]),)?
+                            ))
+                        }
+                    }
+                } else {
+                    for (i, exists) in exists.iter().enumerate() {
+                        if *exists {
+                            sections[i] = Some(<$section_t>::new(
+                                blocks[i].unwrap(),
+                                $(util::void!($marker, metadata[i].unwrap()),)?
+                                light[i].unwrap(),
+                                None,
+                                $(util::void!($marker, add_data[i]),)?
+                            ))
+                        }
+                    }
+                }
+
+                let biomes: NonNull<ByteArray<256>> = NonNull::new(<&mut ByteArray<256>>::try_from(buf.alloc_slice_copy(&data[..std::mem::size_of::<ByteArray<256>>()])).unwrap()).unwrap();
 
                 Ok(Self {
-                    $buf,
+                    buf,
                     size,
-                    $skylight,
+                    skylight,
                     sections,
                     biomes,
                 })
             }
         };
-    }*/
+    }
 
     pub(super) use create;
-    //pub(super) use from_reader_fn;
+    pub(super) use from_reader_fn;
     pub(super) use getter;
     pub(super) use impl_clone;
     pub(super) use opt_getter;
     pub(super) use void;
+    pub(super) use void_t;
 }
 
 pub struct ChunkColumn0 {
@@ -187,7 +258,7 @@ pub struct ChunkColumn0 {
     biomes: NonNull<ByteArray<256>>,
 }
 
-impl_clone!(ChunkColumn0, ChunkSection0, ());
+util::impl_clone!(ChunkColumn0, ChunkSection0, ());
 
 // Safety: This is safe because no data races can occur since the mutable pointers are only written to when &mut self is passed.
 unsafe impl Sync for ChunkColumn0 {}
@@ -225,12 +296,7 @@ impl Encode for ChunkColumn0 {
 }
 
 impl ChunkColumn0 {
-    //util::from_reader_fn!(
-    //    ChunkSection0,
-    //    |buf, data, skylight| { ChunkSection0::new(&buf, &mut data, skylight, add) },
-    //    add,
-    //    u16
-    //);
+    util::from_reader_fn!(ChunkSection0, ByteArray<4096>, add);
 
     /// Creates a new section and zero-initialises all of the buffers
     pub fn insert_section(&mut self, section: usize, add: bool) {
@@ -335,23 +401,21 @@ pub struct ChunkSection0 {
 }
 
 impl ChunkSection0 {
-    //fn new(buf: &Bump, data: &mut &[u8], skylight: bool, add: bool) -> Self {
-    //    Self {
-    //        blocks: create!(ByteArray<4096>, buf, data),
-    //        metadata: create!(HalfByteArray<2048>, buf, data),
-    //        light: create!(HalfByteArray<2048>, buf, data),
-    //        skylight: if skylight {
-    //            Some(create!(HalfByteArray<2048>, buf, data))
-    //        } else {
-    //            None
-    //        },
-    //        add: if add {
-    //            Some(create!(HalfByteArray<2048>, buf, data))
-    //        } else {
-    //            None
-    //        },
-    //    }
-    //}
+    fn new(
+        blocks: NonNull<ByteArray<4096>>,
+        metadata: NonNull<HalfByteArray<2048>>,
+        light: NonNull<HalfByteArray<2048>>,
+        skylight: Option<NonNull<HalfByteArray<2048>>>,
+        add: Option<NonNull<HalfByteArray<2048>>>,
+    ) -> Self {
+        Self {
+            blocks,
+            metadata,
+            light,
+            skylight,
+            add,
+        }
+    }
 
     fn from_slices(
         blocks: &mut [u8],
@@ -422,7 +486,7 @@ pub struct ChunkColumn47 {
     biomes: NonNull<ByteArray<256>>,
 }
 
-impl_clone!(ChunkColumn47, ChunkSection47);
+util::impl_clone!(ChunkColumn47, ChunkSection47);
 
 // Safety: This is safe because no data races can occur since the mutable pointers are only written to when &mut self is passed.
 unsafe impl Sync for ChunkColumn47 {}
@@ -481,93 +545,7 @@ impl ChunkColumn47 {
 }
 
 impl ChunkColumn47 {
-    pub fn from_reader(
-        cursor: &mut std::io::Cursor<&[u8]>,
-        skylight: bool,
-        bitmask: u16,
-    ) -> miners::encoding::decode::Result<Self> {
-        let mut size = 256;
-        let mut exists = [false; 16];
-        for i in 0..16 {
-            exists[i] = util::bit_at(bitmask, i);
-            size += Self::section_size(skylight)
-        }
-
-        let mut data = {
-            let pos = cursor.position() as usize;
-            let slice = cursor
-                .get_ref()
-                .get(pos..pos + size as usize)
-                .ok_or(miners::encoding::decode::Error::UnexpectedEndOfSlice)?;
-            cursor.set_position((pos + size) as u64);
-            debug_assert_eq!(slice.len(), size);
-            slice
-        };
-
-        let buf = Bump::with_capacity(size);
-
-        let mut sections: [Option<ChunkSection47>; 16] = [
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None,
-        ];
-
-        let mut blocks: [Option<NonNull<BlockArray47<4096>>>; 16] = [
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None,
-        ];
-
-        for (i, exists) in exists.iter().enumerate() {
-            if *exists {
-                blocks[i] = Some(util::create!(BlockArray47<4096>, buf, data))
-            }
-        }
-
-        let mut light: [Option<NonNull<HalfByteArray<2048>>>; 16] = [
-            None, None, None, None, None, None, None, None, None, None, None, None, None, None,
-            None, None,
-        ];
-
-        for (i, exists) in exists.iter().enumerate() {
-            if *exists {
-                light[i] = Some(create!(HalfByteArray<2048>, buf, data))
-            }
-        }
-
-        if skylight {
-            for (i, exists) in exists.iter().enumerate() {
-                if *exists {
-                    sections[i] = Some(ChunkSection47 {
-                        blocks: blocks[i].unwrap(),
-                        light: light[i].unwrap(),
-                        skylight: Some(create!(HalfByteArray<2048>, buf, data)),
-                    })
-                }
-            }
-        } else {
-            for (i, exists) in exists.iter().enumerate() {
-                if *exists {
-                    sections[i] = Some(ChunkSection47 {
-                        blocks: blocks[i].unwrap(),
-                        light: light[i].unwrap(),
-                        skylight: None,
-                    })
-                }
-            }
-        }
-
-        let biomes: NonNull<ByteArray<256>> = create!(ByteArray<256>, buf, data);
-        Ok(Self {
-            buf,
-            size,
-            skylight,
-            sections,
-            biomes,
-        })
-    }
-
-    //util::from_reader_fn!(ChunkSection47, |buf, data, skylight| ChunkSection47::new(
-    //    &buf, &mut data, skylight
-    //));
+    util::from_reader_fn!(ChunkSection47, BlockArray47<4096>);
 
     /// Parses 1.8 anvil chunk nbt data into a `ChunkColumn49`. This function does not take an entire region file as input, but one of the chunks contained within.
     pub fn from_nbt(nbt: &miners::nbt::Compound, skylight: bool) -> Option<Self> {
@@ -672,19 +650,19 @@ pub struct ChunkSection47 {
 }
 
 impl ChunkSection47 {
-    //pub(self) fn new(buf: &bumpalo::Bump, data: &mut &[u8], skylight: bool) -> Self {
-    //    ChunkSection47 {
-    //        blocks: create!(BlockArray47<4096>, buf, data),
-    //        light: create!(HalfByteArray<2048>, buf, data),
-    //        skylight: if skylight {
-    //            Some(create!(HalfByteArray<2048>, buf, data))
-    //        } else {
-    //            None
-    //        },
-    //    }
-    //}
+    fn new(
+        blocks: NonNull<BlockArray47<4096>>,
+        light: NonNull<HalfByteArray<2048>>,
+        skylight: Option<NonNull<HalfByteArray<2048>>>,
+    ) -> Self {
+        Self {
+            blocks,
+            light,
+            skylight,
+        }
+    }
 
-    pub(self) fn new_zeroed(buf: &Bump, skylight: bool) -> Self {
+    fn new_zeroed(buf: &Bump, skylight: bool) -> Self {
         ChunkSection47 {
             blocks: NonNull::new(
                 <&mut BlockArray47<4096>>::try_from(buf.alloc_slice_fill_with(8192, |_| 0))
