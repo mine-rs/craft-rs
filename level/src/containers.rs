@@ -1,13 +1,22 @@
-use std::mem::transmute;
+use std::{fmt::Debug, mem::transmute};
 
 use miners::encoding::{Decode, Encode};
 
 pub mod bitpack;
 pub mod palette;
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Default)]
 #[repr(packed)]
 pub struct Block47(u16);
+
+impl Debug for Block47 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Block47")
+            .field(&(self.0 >> 4))
+            .field(&(self.0 & 0xf))
+            .finish()
+    }
+}
 
 impl Block47 {
     pub fn new(id: u16, metadata: u8) -> Self {
@@ -26,6 +35,12 @@ impl Block47 {
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct BlockArray47<const N: usize>([Block47; N]);
+
+impl<const N: usize> BlockArray47<N> {
+    pub fn get(&self, n: usize) -> Option<Block47> {
+        self.0.get(n).cloned()
+    }
+}
 
 impl<const N: usize> AsRef<[Block47]> for BlockArray47<N> {
     fn as_ref(&self) -> &[Block47] {
@@ -314,7 +329,7 @@ unsafe impl<const RLEN: usize> ReadContainer<u8> for HalfByteArray<RLEN> {
 
     unsafe fn get_unchecked(&self, i: usize) -> u8 {
         let byte = *self.0.get_unchecked(i / 2);
-        if i % 2 == 0 {
+        if i % 2 == 1 {
             (byte & 0xf0) >> 4
         } else {
             byte & 0x0f
@@ -334,7 +349,7 @@ unsafe impl<const RLEN: usize> WriteContainer<u8> for HalfByteArray<RLEN> {
 
     unsafe fn set_unchecked(&mut self, i: usize, v: u8) {
         let byte = self.0.get_unchecked_mut(i / 2);
-        if i % 2 == 0 {
+        if i % 2 == 1 {
             *byte &= v << 4
         } else {
             *byte &= v

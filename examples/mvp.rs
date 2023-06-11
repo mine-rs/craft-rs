@@ -47,6 +47,7 @@ const RSA_BIT_SIZE: usize = 2048;
 async fn main() {
     let mut args = std::env::args();
     let offline = args.any(|v| v == "--offline-mode");
+    let compression = !args.any(|v| v == "--no-compression");
 
     let priv_key = Arc::new(RsaPrivateKey::new(&mut OsRng, RSA_BIT_SIZE).unwrap());
     let pub_key = Arc::new(priv_key.to_public_key().to_public_key_der().unwrap());
@@ -79,6 +80,7 @@ async fn main() {
             pub_key.clone(),
             chunk.clone(),
             offline,
+            compression,
         ));
     }
 }
@@ -90,6 +92,7 @@ async fn accept(
     pub_key: Arc<Document>,
     chunk: Arc<ChunkColumn47>,
     offline: bool,
+    compression: bool,
 ) {
     let mut encoder = Encoder::new();
     match handshake(&mut conn, version).await.unwrap() {
@@ -103,6 +106,7 @@ async fn accept(
                 pub_key,
                 chunk,
                 offline,
+                compression
             )
             .await
             .unwrap();
@@ -174,6 +178,7 @@ async fn login(
     pub_key: Arc<Document>,
     chunk: Arc<ChunkColumn47>,
     offline: bool,
+    compression: bool,
 ) -> anyhow::Result<(Reader, Writer)> {
     let username = if let SbLogin::LoginStart0(packet) =
         SbLogin::parse(conn.read_half.read_encoded().await?.into_packet()?, version)?
@@ -220,9 +225,9 @@ async fn login(
         hash.update(pub_key.as_bytes());
         let hash = BigInt::from_signed_bytes_be(hash.finalize().as_ref()).to_str_radix(16);
         let resp = isahc::get_async(format!(
-        "https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={hash}",
-    ))
-    .await?;
+            "https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={hash}",
+        ))
+        .await?;
         if !(StatusCode::OK == resp.status()) {
             bail!(
                 "request to sessionserver failed with status code: {}",
@@ -249,12 +254,6 @@ async fn login(
         dbg!(test);
 
         conn.enable_encryption(secret.as_ref())?;
-
-        conn.write_half
-            .write_packet(version, SetCompression27 { threshold: 512 }, encoder)
-            .await?;
-        conn.write_half.flush().await?;
-        conn.enable_compression(512);
         StringUuid::from(uuid)
     } else {
         StringUuid::from(Uuid::from_bytes([
@@ -262,6 +261,14 @@ async fn login(
             0xa3, 0xa4,
         ]))
     };
+
+    if compression {
+        conn.write_half
+            .write_packet(version, SetCompression27 { threshold: 512 }, encoder)
+            .await?;
+        conn.write_half.flush().await?;
+        conn.enable_compression(512);
+    }
 
     conn.write_half
         .write_packet(
