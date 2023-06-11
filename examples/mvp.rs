@@ -17,12 +17,12 @@ use miners::nbt;
 use miners::protocol::netty::handshaking::serverbound::NextState0;
 use miners::protocol::netty::handshaking::SbHandshaking;
 use miners::protocol::netty::login::clientbound::{
-    EncryptionRequest19, SetCompression27, Success0, Success5,
+    EncryptionRequest19, SetCompression27, Success0,
 };
 use miners::protocol::netty::login::serverbound::{EncryptionResponse19, LoginStart0};
 use miners::protocol::netty::login::SbLogin;
 use miners::protocol::netty::play::clientbound::{
-    ChunkData27, Dimension0, GameMode0, JoinGame29, KeepAlive32, MapChunkBulk27, PlayerAbilities0,
+    ChunkData27, Dimension0, GameMode0, JoinGame29, KeepAlive32, PlayerAbilities0,
     PositionAndLook6, SpawnPosition6,
 };
 use miners::protocol::netty::play::serverbound::KeepAlive7;
@@ -45,6 +45,9 @@ const RSA_BIT_SIZE: usize = 2048;
 
 #[async_std::main]
 async fn main() {
+    let mut args = std::env::args();
+    let offline = args.any(|v| v == "--offline-mode");
+
     let priv_key = Arc::new(RsaPrivateKey::new(&mut OsRng, RSA_BIT_SIZE).unwrap());
     let pub_key = Arc::new(priv_key.to_public_key().to_public_key_der().unwrap());
 
@@ -75,6 +78,7 @@ async fn main() {
             priv_key.clone(),
             pub_key.clone(),
             chunk.clone(),
+            offline,
         ));
     }
 }
@@ -85,14 +89,23 @@ async fn accept(
     priv_key: Arc<RsaPrivateKey>,
     pub_key: Arc<Document>,
     chunk: Arc<ChunkColumn47>,
+    offline: bool,
 ) {
     let mut encoder = Encoder::new();
     match handshake(&mut conn, version).await.unwrap() {
         NextState0::Status => (),
         NextState0::Login => {
-            let (read, write) = login(conn, &mut encoder, version, priv_key, pub_key, chunk)
-                .await
-                .unwrap();
+            let (read, write) = login(
+                conn,
+                &mut encoder,
+                version,
+                priv_key,
+                pub_key,
+                chunk,
+                offline,
+            )
+            .await
+            .unwrap();
             play(read, write, version).await.unwrap()
         }
     };
@@ -111,7 +124,7 @@ async fn play(mut read: Reader, write: Writer, version: ProtocolVersion) -> anyh
                 let packet: KeepAlive7 = packet;
                 let mut id = keepalive_id.lock().await;
                 if packet.id != *id {
-                    bail!("keepalive id corrupted")
+                    println!("keepalive id corrupted")
                 }
                 *id = rand::random();
             }
@@ -160,6 +173,7 @@ async fn login(
     priv_key: Arc<RsaPrivateKey>,
     pub_key: Arc<Document>,
     chunk: Arc<ChunkColumn47>,
+    offline: bool,
 ) -> anyhow::Result<(Reader, Writer)> {
     let username = if let SbLogin::LoginStart0(packet) =
         SbLogin::parse(conn.read_half.read_encoded().await?.into_packet()?, version)?
@@ -170,84 +184,91 @@ async fn login(
         bail!("incorrect packet order")
     };
 
-    // let verify_token: [u8; 32] = rand::random();
+    let uuid = if !offline {
+        // TODO: Fix client side decoding errors.
+        let verify_token: [u8; 32] = rand::random();
 
-    // conn.write_half
-    //     .write_packet(
-    //         version,
-    //         EncryptionRequest19 {
-    //             server_id: "".into(),
-    //             public_key: pub_key.as_bytes().into(),
-    //             verify_token: (&verify_token[..]).into(),
-    //         },
-    //         encoder,
-    //     )
-    //     .await?;
+        conn.write_half
+            .write_packet(
+                version,
+                EncryptionRequest19 {
+                    server_id: "".into(),
+                    public_key: pub_key.as_bytes().into(),
+                    verify_token: (&verify_token[..]).into(),
+                },
+                encoder,
+            )
+            .await?;
 
-    // conn.write_half.flush().await?;
+        conn.write_half.flush().await?;
 
-    // let secret = if let SbLogin::EncryptionResponse19(packet) =
-    //     SbLogin::parse(conn.read_half.read_encoded().await?.into_packet()?, version)?
-    // {
-    //     let packet: EncryptionResponse19 = packet;
-    //     if &priv_key.decrypt(Pkcs1v15Encrypt, &packet.verify_token)? != &verify_token {
-    //         bail!("verify token corrupted!")
-    //     }
-    //     priv_key.decrypt(Pkcs1v15Encrypt, &packet.secret)?
-    // } else {
-    //     bail!("incorrect packet order")
-    // };
+        let secret = if let SbLogin::EncryptionResponse19(packet) =
+            SbLogin::parse(conn.read_half.read_encoded().await?.into_packet()?, version)?
+        {
+            let packet: EncryptionResponse19 = packet;
+            if &priv_key.decrypt(Pkcs1v15Encrypt, &packet.verify_token)? != &verify_token {
+                bail!("verify token corrupted!")
+            }
+            priv_key.decrypt(Pkcs1v15Encrypt, &packet.secret)?
+        } else {
+            bail!("incorrect packet order")
+        };
 
-    // let mut hash: Sha1 = Sha1::new();
-    // hash.update(b"");
-    // hash.update(&secret);
-    // hash.update(pub_key.as_bytes());
-    // let hash = BigInt::from_signed_bytes_be(hash.finalize().as_ref()).to_str_radix(16);
-    // let resp = isahc::get_async(format!(
-    //     "https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={hash}",
-    // ))
-    // .await?;
-    // if !(StatusCode::OK == resp.status()) {
-    //     bail!(
-    //         "request to sessionserver failed with status code: {}",
-    //         resp.status()
-    //     )
-    // }
-    // let mut body = String::new();
-    // resp.into_body().read_to_string(&mut body).await?;
+        let mut hash: Sha1 = Sha1::new();
+        hash.update(b"");
+        hash.update(&secret);
+        hash.update(pub_key.as_bytes());
+        let hash = BigInt::from_signed_bytes_be(hash.finalize().as_ref()).to_str_radix(16);
+        let resp = isahc::get_async(format!(
+        "https://sessionserver.mojang.com/session/minecraft/hasJoined?username={username}&serverId={hash}",
+    ))
+    .await?;
+        if !(StatusCode::OK == resp.status()) {
+            bail!(
+                "request to sessionserver failed with status code: {}",
+                resp.status()
+            )
+        }
+        let mut body = String::new();
+        resp.into_body().read_to_string(&mut body).await?;
 
-    // let json = serde_json::Value::from_str(&body)?;
+        let json = serde_json::Value::from_str(&body)?;
 
-    // let uuid = Uuid::from_str(
-    //     json.get("id")
-    //         .map_or(Err(anyhow!("uuid not present in response")), |v| Ok(v))?
-    //         .as_str()
-    //         .map_or(Err(anyhow!("uuid is not string")), |v| Ok(v))?,
-    // )?;
+        let uuid = Uuid::from_str(
+            json.get("id")
+                .map_or(Err(anyhow!("uuid not present in response")), |v| Ok(v))?
+                .as_str()
+                .map_or(Err(anyhow!("uuid is not string")), |v| Ok(v))?,
+        )?;
 
-    // let test = json.get("id")
-    // .map_or(Err(anyhow!("uuid not present in response")), |v| Ok(v))?
-    // .as_str()
-    // .map_or(Err(anyhow!("uuid is not string")), |v| Ok(v))?;
-    // dbg!(test);
+        let test = json
+            .get("id")
+            .map_or(Err(anyhow!("uuid not present in response")), |v| Ok(v))?
+            .as_str()
+            .map_or(Err(anyhow!("uuid is not string")), |v| Ok(v))?;
+        dbg!(test);
 
-    // conn.enable_encryption(secret.as_ref())?;
+        conn.enable_encryption(secret.as_ref())?;
 
-    // conn.write_half
-    //     .write_packet(version, SetCompression27 { threshold: -1 }, encoder)
-    //     .await?;
-    // conn.write_half.enable_compression(1);
-    // dbg!(uuid);
+        conn.write_half
+            .write_packet(version, SetCompression27 { threshold: 512 }, encoder)
+            .await?;
+        conn.write_half.flush().await?;
+        conn.enable_compression(512);
+        StringUuid::from(uuid)
+    } else {
+        StringUuid::from(Uuid::from_bytes([
+            0xa1, 0xa2, 0xa3, 0xa4, 0xb1, 0xb2, 0xa1, 0xa2, 0xa3, 0xa4, 0xb1, 0xb2, 0xa1, 0xa2,
+            0xa3, 0xa4,
+        ]))
+    };
 
     conn.write_half
         .write_packet(
             version,
             Success0 {
                 username: (&username).into(),
-                uuid: StringUuid::from(Uuid::from_bytes([
-                    0xa1, 0xa2, 0xa3, 0xa4, 0xb1, 0xb2, 0xa1, 0xa2, 0xa3, 0xa4, 0xb1, 0xb2, 0xa1,
-                    0xa2, 0xa3, 0xa4,
-                ])),
+                uuid,
             },
             encoder,
         )
@@ -258,7 +279,7 @@ async fn login(
     println!("{username} logged in!");
     println!("success0");
 
-    let (mut read, mut write) = conn.split();
+    let (read, mut write) = conn.split();
 
     write
         .write_packet(

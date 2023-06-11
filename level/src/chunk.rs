@@ -1,10 +1,7 @@
 use std::ptr::NonNull;
 
 use bumpalo::Bump;
-use miners::{
-    encoding::Encode,
-    nbt::List,
-};
+use miners::{encoding::Encode, nbt::List};
 
 use crate::containers::{Block47, BlockArray47, ByteArray, HalfByteArray, ReadContainer};
 
